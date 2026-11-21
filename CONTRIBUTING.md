@@ -61,3 +61,13 @@ An adapter is done when:
 - Add a test for every bug fix, especially false PASS or false alarm fixes.
 - Keep PRs focused. Update `CHANGELOG.md` under "Unreleased".
 - Never commit real keys, tokens or report files from real projects. `*-report.md` is git-ignored.
+
+## Maintainers: going public
+
+Branch protection and private vulnerability reporting need a public repository (or GitHub Pro).
+After switching the repository to public, run:
+
+```bash
+gh api -X POST repos/KaanKaya17/rlsprobe/rulesets --input .github/rulesets/protect-main.json
+gh api -X PUT repos/KaanKaya17/rlsprobe/private-vulnerability-reporting
+```
