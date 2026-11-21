@@ -1,0 +1,52 @@
+name: Supabase e2e
+# Runs accessprobe against a real local Supabase (Postgres + PostgREST + GoTrue) started from
+# test/supabase-local/supabase/migrations, then runs the GitHub Action (uses: ./) the same way.
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  real-supabase:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Start local Supabase with the fixture migrations
+        working-directory: test/supabase-local
+        run: |
+          [ -f supabase/config.toml ] || supabase init < /dev/null
+          supabase start
+          eval "$(supabase status -o env)"
+          key="${ANON_KEY:-$PUBLISHABLE_KEY}"
+          [ -n "$API_URL" ] && [ -n "$key" ] || { supabase status -o env | cut -d= -f1; echo "API_URL / ANON_KEY missing"; exit 1; }
+          echo "SB_URL=$API_URL" >> "$GITHUB_ENV"
+          echo "SB_ANON=$key" >> "$GITHUB_ENV"
+      - name: accessprobe against real Postgres
+        run: |
+          set +e
+          node bin/accessprobe.js --url "$SB_URL" --anon-key "$SB_ANON" --source test/supabase-local --yes --json > result.json
+          code=$?
+          set -e
+          echo "exit code $code (1 expected: the fixture has critical leaks)"
+          [ "$code" = 1 ] || { cat result.json; exit 1; }
+          node test/supabase-local/check.mjs result.json
+      - name: The GitHub Action (uses ./) on the same project
+        id: action
+        uses: ./
+        with:
+          args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source test/supabase-local --quiet
+          fail-on: never
+      - name: Action outputs
+        run: |
+          test "${{ steps.action.outputs.exit-code }}" = 1
+          test -s "${{ steps.action.outputs.report }}"
+          grep -q "security_invoker = true" "${{ steps.action.outputs.report }}"
+          echo "Action reported exit code 1 and wrote the report."

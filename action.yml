@@ -1,0 +1,76 @@
+name: accessprobe
+description: Prove your Supabase RLS and Firebase rules work. Two real test users attack each other's data; only proven leaks fail the build.
+author: Kaan Kaya
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  args:
+    description: >
+      accessprobe arguments, e.g. "--url http://127.0.0.1:54321 --anon-key <key> --source ." for a local
+      Supabase started with `supabase start`, or "--project-id demo-app --api-key x --source . --emulator"
+      for the Firebase Emulator Suite. --yes and --out are added for you.
+    required: false
+    default: ''
+  working-directory:
+    description: Directory to run in (the folder with your supabase/ or firebase rules).
+    required: false
+    default: '.'
+  report:
+    description: Where to write the Markdown report (relative to working-directory).
+    required: false
+    default: accessprobe-report.md
+  fail-on:
+    description: '"critical" (default) fails the step on a proven critical leak or when nothing could be tested; "never" only warns.'
+    required: false
+    default: critical
+  summary:
+    description: Add the report to the job summary. On public repositories the summary is public too.
+    required: false
+    default: 'true'
+
+outputs:
+  exit-code:
+    description: 0 = no critical findings, 1 = critical findings, 2 = usage error, 3 = nothing could be tested.
+    value: ${{ steps.run.outputs.exit-code }}
+  report:
+    description: Path of the Markdown report.
+    value: ${{ steps.run.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        AP_BIN: ${{ github.action_path }}/bin/accessprobe.js
+        AP_ARGS: ${{ inputs.args }}
+        AP_REPORT: ${{ inputs.report }}
+        AP_FAIL_ON: ${{ inputs.fail-on }}
+        AP_SUMMARY: ${{ inputs.summary }}
+      run: |
+        if ! node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 20 ? 0 : 1)"; then
+          echo "::error::accessprobe needs Node 20 or newer. Add actions/setup-node before this step."
+          exit 2
+        fi
+        set +e
+        # word splitting of AP_ARGS is intended: it holds several CLI arguments
+        # shellcheck disable=SC2086
+        node "$AP_BIN" --yes --out "$AP_REPORT" $AP_ARGS
+        code=$?
+        set -e
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        echo "report=$AP_REPORT" >> "$GITHUB_OUTPUT"
+        if [ "$AP_SUMMARY" = "true" ] && [ -f "$AP_REPORT" ]; then cat "$AP_REPORT" >> "$GITHUB_STEP_SUMMARY"; fi
+        case "$code" in
+          0) echo "::notice::accessprobe: no critical findings." ;;
+          1)
+            msg="accessprobe proved critical access-rule problems. The report has the fixes."
+            if [ "$AP_FAIL_ON" = "never" ]; then echo "::warning::$msg"; else echo "::error::$msg"; exit 1; fi ;;
+          3)
+            msg="accessprobe could not test anything. Check the arguments and the notes in the report."
+            if [ "$AP_FAIL_ON" = "never" ]; then echo "::warning::$msg"; else echo "::error::$msg"; exit 1; fi ;;
+          *) echo "::error::accessprobe did not run (exit code $code). See the log above."; exit "$code" ;;
+        esac
