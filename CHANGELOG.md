@@ -9,6 +9,8 @@ All notable changes to this project are documented here. The format follows
 ## [0.3.0] - 2026-11-21
 
 ### Added
+- **Supabase "Confirm email" check:** before signing up test users, rlsprobe reads the project's public auth settings. If confirmation emails would be sent, it stops and nothing is created. Bouncing emails to made-up addresses can get a project's email sending restricted.
+- npm releases use Trusted Publishing (OIDC), so no npm token needs to be stored. Private repositories skip npm.
 - **Zero-config:** `npx rlsprobe` in a project folder finds everything by itself.
   - **Supabase:** the URL and the public anon key come from `.env*`, `local.properties`, `app.json` or client code.
   - **Firebase:** the web config comes from `initializeApp({...})`.

@@ -1,7 +1,11 @@
 name: Release
 # Push a tag like v0.3.0 (matching package.json) to publish.
-# npm publishing needs the NPM_TOKEN repository secret; without it the npm step is skipped
-# and only the GitHub release is created.
+#
+# npm: Trusted Publishing (OIDC) — no token stored anywhere. One-time setup on npmjs.com:
+#   package rlsprobe → Settings → Trusted Publisher → GitHub Actions,
+#   repository KaanKaya17/rlsprobe, workflow release.yml.
+# (The very first publish has to be done once by hand, because the package must exist first.)
+# An NPM_TOKEN secret still works as a fallback. Private repositories skip npm entirely.
 on:
   push:
     tags: ['v*']
@@ -11,8 +15,6 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -35,10 +37,16 @@ jobs:
           awk -v h="## [$v]" 'index($0, h) == 1 {f=1; next} index($0, "## [") == 1 {f=0} f' CHANGELOG.md > notes.md
           [ -s notes.md ] || { echo "CHANGELOG.md has no section for $v"; exit 1; }
       - name: Publish to npm
-        if: env.NPM_TOKEN != ''
-        run: npm publish --access public ${{ github.event.repository.private == false && '--provenance' || '' }}
+        if: github.event.repository.private == false
+        run: |
+          # Trusted Publishing needs npm >= 11.5; it also adds provenance automatically
+          npm install -g npm@11.6.2
+          npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: npm skipped (private repository)
+        if: github.event.repository.private == true
+        run: echo "::notice::Repository is private, so the package was not published to npm. Make it public to publish."
       - name: GitHub release
         run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag || gh release edit "$GITHUB_REF_NAME" --notes-file notes.md
         env:

@@ -39,7 +39,7 @@ test('notes: correct owner policies produce no findings', () => {
   assert.ok(result.passed.some((p) => p.startsWith('notes: B cannot read')));
 });
 
-test('bigint owner ids via an app users table (FitLog style) are resolved', () => {
+test('bigint owner ids via an app users table (Android app style) are resolved', () => {
   // secure table: full write tests ran and passed
   assert.equal(result.findings.filter((f) => f.table === 'workouts').length, 0);
   assert.ok(result.passed.includes("workouts: B cannot read A's rows"));
