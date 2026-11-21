@@ -48,7 +48,7 @@ test('finds URL + anon key in .env files, never picks a secret key, flags public
   assert.equal(c.findings.filter((f) => f.id === 'leaked-service-role-env').length, 1, 'server-only key is not a finding');
 });
 
-test('Android local.properties (FitLog style) works too', async () => {
+test('Android local.properties (Android app style) works too', async () => {
   const d = await mkdtemp(join(tmpdir(), 'rlsprobe-android-'));
   try {
     await mkdir(join(d, 'app'));

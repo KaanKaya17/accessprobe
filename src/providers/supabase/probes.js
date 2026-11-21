@@ -16,6 +16,25 @@ export async function setupUsers(client, { userA, userB, emailDomain = 'example.
   ];
   const users = [];
   const madeSoFar = [];
+  // Before signing anyone up: if "Confirm email" is on, Supabase would send confirmation emails to
+  // made-up addresses. They bounce, and a high bounce rate can get the project's email sending
+  // restricted — which would break the app's real sign-ups. So check first and stop.
+  if (!userA || !userB) {
+    const s = await client.authSettings();
+    if (s.ok && s.data && typeof s.data === 'object') {
+      if (s.data.disable_signup) {
+        throw new Error('Sign-ups are disabled in this project. Create two test users (Dashboard → Authentication → Add user) and pass them with --user-a email:password --user-b email:password.');
+      }
+      if (s.data.mailer_autoconfirm === false) {
+        throw new Error(
+          '"Confirm email" is enabled, so signing up test users would send confirmation emails to addresses that bounce\n' +
+            '  (high bounce rates can get your project\'s email sending restricted). Nothing was created.\n' +
+            '  Create two test users yourself (Dashboard → Authentication → Add user, with "Auto Confirm User")\n' +
+            '  and pass them with --user-a email:password --user-b email:password',
+        );
+      }
+    }
+  }
   const fail = (m) => {
     const left = madeSoFar.length
       ? `\n  Test users already created (delete them in Dashboard → Authentication → Users): ${madeSoFar.join(', ')}`

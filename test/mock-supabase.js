@@ -33,7 +33,7 @@ const authed = (ctx) => ctx.role === 'authenticated';
 function makeState() {
   const u1 = randomUUID();
   const u2 = randomUUID();
-  // like FitLog's current_user_id(): auth.uid() → app_users.user_id
+  // like a real app's current_user_id(): auth.uid() → app_users.user_id
   const appId = (c) => c.uid && S.tables.app_users.rows.find((r) => r.auth_id === c.uid)?.user_id;
   const mineApp = (c, r) => appId(c) !== undefined && String(r.user_id) === String(appId(c));
   const ownApp = () => ({ select: mineApp, insert: mineApp, update: mineApp, delete: mineApp });
@@ -87,7 +87,7 @@ function makeState() {
         rls: { select: () => true, insert: () => false, update: () => false, delete: () => false },
         rows: [{ id: 1, name: 'T-shirt', price: 20 }],
       },
-      // FitLog-style: own users table with bigint ids, other tables point at it
+      // real-app style: own users table with bigint ids, other tables point at it
       app_users: {
         columns: { user_id: ['bigint', { pk: true, default: true }], auth_id: ['uuid'], email: ['text'] },
         rls: {
@@ -244,11 +244,12 @@ async function body(req) {
   return s;
 }
 
-export function createServer() {
+export function createServer({ autoconfirm = true } = {}) {
   const S = makeState();
+  S.signups = 0;
   const site = `<!doctype html><html><head><script type="module" src="/assets/index-abc123.js"></script></head><body><div id="root"></div></body></html>`;
 
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     const port = req.socket.localPort;
     const send = (status, data, headers = {}) => {
       res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
@@ -265,7 +266,11 @@ export function createServer() {
     }
 
     // ---------- auth ----------
+    if (u.pathname === '/auth/v1/settings' && req.method === 'GET') {
+      return send(200, { disable_signup: false, mailer_autoconfirm: autoconfirm, phone_autoconfirm: false, external: { email: true } });
+    }
     if (u.pathname === '/auth/v1/signup' && req.method === 'POST') {
+      S.signups++;
       const { email, password } = JSON.parse(await body(req));
       if (S.users.has(email)) return send(422, { msg: 'User already registered' });
       const id = randomUUID();
@@ -382,6 +387,8 @@ export function createServer() {
 
     send(404, { message: 'not found' });
   });
+  server.stats = () => ({ signups: S.signups });
+  return server;
 }
 
 // `node test/mock-supabase.js` → starts the demo on :54399

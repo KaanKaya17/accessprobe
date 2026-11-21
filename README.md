@@ -69,8 +69,9 @@ The skill tells the agent to:
 | Area | Check |
 |---|---|
 | Site bundle | Supabase URL + anon key discovery; leaked `service_role` / `sb_secret_` / Stripe / OpenAI / AWS keys |
-| Tables | anonymous read, anonymous write (RLS off), **B reads A's row**, **B updates A's row**, **B deletes A's row**, **B inserts a row as A** |
-| Storage | anonymous listing, **B downloads A's file**, **B deletes A's file** |
+| Tables | anonymous read, anonymous write (RLS off), **B reads A's row**, **B updates A's row**, **B takes A's row over** (sets the owner to itself), **B deletes A's row**, **B inserts a row as A** |
+| Storage | anonymous listing, **B downloads A's file**, **B deletes A's file**, public buckets via their public URL |
+| Project config | secret keys in browser-exposed env vars (`VITE_`, `NEXT_PUBLIC_`, `EXPO_PUBLIC_` …) or in client code |
 | Functions | lists RPCs exposed over the API for review (never calls them) |
 
 **Firebase**
@@ -78,8 +79,8 @@ The skill tells the agent to:
 | Area | Check |
 |---|---|
 | Config | `firebaseConfig` in the site bundle, `google-services.json`, `GoogleService-Info.plist`; leaked service-account keys and FCM server keys |
-| Firestore | **B reads / lists / modifies / deletes A's documents**, **B creates a document in A's name**, anonymous read and write. Owner fields, `{uid}` path ownership and validator schemas (`hasOnly`, `is string`) are read from `firestore.rules` |
-| Realtime Database | anonymous read of the root, **B reads / overwrites A's node** (`users/$uid`), open nodes |
+| Firestore | **B reads / lists / modifies / takes over / deletes A's documents**, **B creates a document in A's name**, anonymous read and write. Owner fields, `{uid}` path ownership and validator schemas (`hasOnly`, `is string`) are read from `firestore.rules` |
+| Realtime Database | anonymous read of the root, **B reads / overwrites A's node** (`users/$uid`), **anyone lists every entry** of a node (user ids, backup codes…), open nodes. Paths come from the rules, or from your code when the rules only live in the console |
 | Storage | **B downloads / lists / deletes A's files**, anonymous download |
 | Rules file | test-mode time limits (`request.time < timestamp.date(…)`), `{document=**}` catch-alls |
 
@@ -98,8 +99,10 @@ npx rlsprobe --site https://your-app.com --source . --out report.md
 # mobile app / no website: point it at the project directly
 npx rlsprobe --url https://xyz.supabase.co --anon-key eyJ... --source .
 
-# "Confirm email" enabled? create two users in the dashboard (auto-confirm) and pass them.
-# If your API has a "delete my account" function, rlsprobe can remove them afterwards.
+# "Confirm email" enabled? rlsprobe notices and stops BEFORE signing anyone up (bouncing
+# confirmation emails can get a project's email sending restricted). Create two users in the
+# dashboard with "Auto Confirm User" and pass them. If your API has a "delete my account"
+# function, rlsprobe can remove them afterwards.
 npx rlsprobe --url ... --anon-key ... --source . \
   --user-a a@test.dev:pass1 --user-b b@test.dev:pass2 --cleanup-rpc delete_my_account
 ```
@@ -140,13 +143,26 @@ key, never into shared nodes.
 **Exit codes:** `0` ok, `1` critical issue found, `2` usage error, `3` nothing could be tested.
 rlsprobe never reports a clean grade for an app it couldn't test.
 
-## Tested on a real app
+## Tested on real apps
 
-The first real-world run was against FitLog, an Android app with 8 tables, `bigint` user ids mapped
-through `current_user_id()`, and strict GRANTs. The result: 5 tables fully attacked, 3 read-only for
-users, **0 false positives**, and all test users and rows removed afterwards. The run turned up
-three bugs in rlsprobe itself: the hidden API schema, the id mapping, and CHECK constraints. All three
-are now fixed and covered by tests.
+- **Supabase:** a production Android fitness app with 8 tables, `bigint` user ids mapped through
+  `current_user_id()`, and strict GRANTs.
+  - Result: 5 tables fully attacked, 3 read-only for users, **0 false positives**.
+  - All test users and rows were removed afterwards.
+- **Firebase Realtime Database:** a multiplayer Android game whose rules lived only in the console.
+  - Result: 3 critical leaks proven. Any player could overwrite another player's online status, and
+    could read and overwrite other players' duel invites.
+  - The rules fix was tested in the Emulator Suite: all 25 of the game's own read/write flows still
+    worked and all 8 attacks were blocked. It was then deployed and re-verified live.
+  - One read stays open: the app itself reads other players' inboxes to count pending invites, so
+    closing it needs an app update, not a rules change.
+
+Each run also turned up bugs in rlsprobe itself, all fixed and covered by tests:
+
+- the hidden API schema and id mapping;
+- CHECK constraints and `.validate` shapes;
+- test entries in create-only nodes;
+- a guard against testing the wrong database.
 
 ## Try it on a deliberately vulnerable app
 
@@ -162,8 +178,10 @@ project. It asks you to confirm ownership before every run unless you pass `--ye
 
 ## Roadmap
 
+- [x] Claude Code skill + `AGENTS.md` for Codex / Cursor (`rlsprobe setup-agent`)
+- [x] Zero-config runs (`npx rlsprobe` in a project folder)
 - [ ] GitHub Action + turn findings into permanent pgTAP regression tests
-- [ ] MCP server / Claude Code skill: agents run it after every schema change
+- [ ] MCP server: agents run it after every schema change
 - [ ] Edge Function checks (auth required? cross-user IDs?)
 - [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)
 - [ ] PocketBase, Appwrite: same two-user engine, one adapter each

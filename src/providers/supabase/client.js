@@ -111,6 +111,11 @@ export class SupabaseClient {
   }
 
   // ---------- Auth ----------
+  // public GoTrue settings: { disable_signup, mailer_autoconfirm, … } — no secrets involved
+  authSettings() {
+    return this.request('GET', '/auth/v1/settings');
+  }
+
   signUp(email, password) {
     return this.request('POST', '/auth/v1/signup', { body: { email, password } });
   }
