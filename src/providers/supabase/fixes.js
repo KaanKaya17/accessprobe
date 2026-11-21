@@ -68,20 +68,12 @@ export function storagePolicies(bucket) {
   ].join('\n');
 }
 
-export function aiPrompt(finding) {
-  const parts = [
-    `Security issue found by rlsprobe in my Supabase app: ${finding.title}.`,
-    `Proof: ${finding.evidence}`,
-    finding.id.startsWith('leaked-')
-      ? 'Please remove this secret from all client-side code and environment variables that are exposed to the browser.'
-      : 'Please fix this at the database level (Row Level Security), not in the frontend.',
-  ];
-  if (finding.fix?.sql) parts.push(`Apply this SQL as a new migration (adjust names if needed):\n\n${finding.fix.sql}`);
-  if (finding.fix?.steps?.length) parts.push(`Steps:\n- ${finding.fix.steps.join('\n- ')}`);
-  parts.push(
-    finding.id.startsWith('leaked-')
-      ? 'Move every call that needs this secret into a Supabase Edge Function or server route. Afterwards show me where the key is still referenced.'
-      : 'Do not disable RLS and do not use the service_role key in client code. Afterwards list every policy on this table so I can review it.',
-  );
-  return parts.join('\n\n');
-}
+// How fixes are presented in reports and AI prompts (used by core/report.js)
+export const fixStyle = {
+  lang: 'sql',
+  codeLabel: 'Fix (SQL — run in the Supabase SQL editor or as a migration)',
+  fixWhere: 'Please fix this at the database level (Row Level Security), not in the frontend.',
+  codeIntro: 'Apply this SQL as a new migration (adjust names if needed):',
+  dont: 'Do not disable RLS and do not use the service_role key in client code. Afterwards list every policy on this table so I can review it.',
+  secretMove: 'Move every call that needs this secret into a Supabase Edge Function or server route.',
+};

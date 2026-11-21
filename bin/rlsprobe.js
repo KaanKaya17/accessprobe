@@ -2,24 +2,35 @@
 import { parseArgs } from 'node:util';
 import { writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
-import { scan } from '../src/scan.js';
-import { printReport, markdownReport, grade, color } from '../src/report.js';
+import { scan } from '../src/core/scan.js';
+import { printReport, markdownReport, grade, color } from '../src/core/report.js';
 
 const HELP = `
-rlsprobe — prove your Supabase Row Level Security actually works
+rlsprobe — prove your backend's access rules actually work (Supabase, Firebase)
 
 Usage
-  npx rlsprobe --site https://your-app.com
-  npx rlsprobe --url https://xyz.supabase.co --anon-key eyJ...
+  npx rlsprobe --site https://your-app.com --source .
+  npx rlsprobe --url https://xyz.supabase.co --anon-key eyJ... --source .
+  npx rlsprobe --project-id my-app --api-key AIza... --source .
 
 Options
-  --site <url>           Your deployed app. Finds the Supabase URL + anon key in its JS
+  --site <url>           Your deployed app. Finds the backend config in its JS
                          and checks the bundle for leaked secret keys.
+  --source <dir>         Your project folder. Supabase: supabase/migrations/*.sql and
+                         table names in code. Firebase: firestore.rules, storage.rules,
+                         database.rules.json, google-services.json, collection names.
+  --platform <name>      Force a backend (default: auto-detect): supabase, firebase
+
+Supabase
   --url <url>            Supabase project URL (skip discovery)
   --anon-key <key>       Public anon / publishable key
-  --source <dir>         Your project folder. Reads tables + columns from
-                         supabase/migrations/*.sql and table names from app code.
-                         Needed for new Supabase projects (API schema is hidden).
+
+Firebase
+  --project-id <id>      Firebase project id (skip discovery)
+  --api-key <key>        Web API key (AIza…, public by design)
+  --emulator             Test against the local Firebase Emulator Suite (default ports)
+
+Common
   --user-a <email:pw>    Existing test user A (default: sign up a new one)
   --user-b <email:pw>    Existing test user B
   --email-domain <d>     Domain for auto-created test users (default: example.com)
@@ -51,6 +62,10 @@ const OPTIONS = {
   'email-domain': { type: 'string' },
   'cleanup-rpc': { type: 'string' },
   source: { type: 'string' },
+  platform: { type: 'string' },
+  'project-id': { type: 'string' },
+  'api-key': { type: 'string' },
+  emulator: { type: 'boolean' },
   table: { type: 'string', multiple: true },
   only: { type: 'string', multiple: true },
   bucket: { type: 'string', multiple: true },
@@ -69,7 +84,8 @@ try {
   process.exit(2);
 }
 
-if (v.help || (!v.site && !v.url)) {
+const target = v.site || v.url || (v['project-id'] && `Firebase project ${v['project-id']}`) || v.source;
+if (v.help || !target) {
   console.log(HELP);
   process.exit(v.help ? 0 : 2);
 }
@@ -80,7 +96,7 @@ if (!v.yes) {
   // closed stdin (CI without --yes) must abort, not hang
   const a = await new Promise((resolve) => {
     rl.once('close', () => resolve(''));
-    rl.question(`Do you own (or have permission to test) ${v.site || v.url}? [y/N] `).then(resolve, () => resolve(''));
+    rl.question(`Do you own (or have permission to test) ${target}? [y/N] `).then(resolve, () => resolve(''));
   });
   rl.close();
   if (!/^y(es)?$/i.test(a.trim())) {
@@ -99,6 +115,10 @@ try {
     emailDomain: v['email-domain'],
     cleanupRpc: v['cleanup-rpc'],
     source: v.source,
+    platform: v.platform,
+    projectId: v['project-id'],
+    apiKey: v['api-key'],
+    emulator: v.emulator,
     tables: v.table,
     only: v.only,
     buckets: v.bucket,

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSchema, buildRow } from '../src/schema.js';
+import { parseSchema, buildRow } from '../src/providers/supabase/schema.js';
 
 const doc = (props, required = []) => ({
   definitions: { t: { properties: props, required } },

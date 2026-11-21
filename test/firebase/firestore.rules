@@ -1,0 +1,57 @@
+rules_version = '2';
+// Fake app for rlsprobe tests. Mixes deliberate real-world mistakes with correct rules.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // LEAK: any signed-in user can read every profile. Writes are owner-only.
+    match /profiles/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // LEAK + FORGERY: any signed-in user reads all orders and may create an
+    // order with any userId. Update/delete are owner-only.
+    match /orders/{id} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+
+    // CORRECT: owner-only on field ownerId.
+    match /notes/{id} {
+      allow read, update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+    }
+
+    // INTENDED PUBLIC: anyone reads, only the owner writes.
+    match /public_posts/{id} {
+      allow read: if true;
+      allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+    }
+
+    // WIDE OPEN.
+    match /logs/{id} {
+      allow read, write: if true;
+    }
+
+    // CORRECT: per-user private subcollection.
+    match /users/{uid}/private/{doc} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // CORRECT + VALIDATOR: owner-only and schema-checked.
+    match /strict/{id} {
+      allow read, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow create: if request.auth != null
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['ownerId', 'title'])
+        && request.resource.data.title is string;
+      allow update: if request.auth != null
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['ownerId', 'title'])
+        && request.resource.data.title is string;
+    }
+  }
+}

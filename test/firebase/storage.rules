@@ -1,0 +1,14 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // LEAK: any signed-in user reads every avatar; only the owner writes.
+    match /avatars/{uid}/{file} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+    // CORRECT: owner-only.
+    match /private/{uid}/{file} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}
