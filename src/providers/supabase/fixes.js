@@ -55,6 +55,32 @@ export function noOwnerColumn(table) {
   ].join('\n');
 }
 
+// Users may update their row, but not these columns. Postgres column privileges do that:
+// a column REVOKE is ignored while a table-wide UPDATE grant exists, so re-grant the rest.
+export function privilegeFix(t, locked) {
+  const tbl = `public.${q(t.name)}`;
+  const rest = t.columns.filter((c) => !locked.includes(c.name) && !c.pk).map((c) => q(c.name));
+  return [
+    `-- ${t.name}: users may still edit their row, but not ${locked.join(', ')}`,
+    `revoke update on ${tbl} from anon, authenticated;`,
+    rest.length
+      ? `grant update (${rest.join(', ')}) on ${tbl} to authenticated;`
+      : `-- no other columns to allow: users can no longer update this table directly`,
+    `-- Change ${locked.join(', ')} only from trusted code: an Edge Function / server route with the`,
+    '-- service_role key, a payment webhook, or a SECURITY DEFINER function that checks the caller.',
+    '-- Columns added later are not updatable until you add them to the grant above.',
+  ].join('\n');
+}
+
+export function viewInvoker(view) {
+  return [
+    `-- ${view}: make the view respect the RLS policies of the tables it reads (Postgres 15+)`,
+    `alter view public.${q(view)} set (security_invoker = true);`,
+    '-- If the view must show data the tables hide (e.g. public profile fields), keep only those',
+    '-- columns in it, or replace it with a SECURITY DEFINER function that checks auth.uid().',
+  ].join('\n');
+}
+
 export function storagePolicies(bucket) {
   return [
     `-- bucket "${bucket}": each user may only touch files under "<their user id>/..."`,

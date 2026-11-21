@@ -54,3 +54,23 @@ export function rtdbOwnerRules(base) {
 export function rtdbLockNode(path) {
   return `// database.rules.json — "/${path}" should not be writable by everyone:\n"${path.split('/').pop()}": { ".read": "auth != null", ".write": false }`;
 }
+
+// The user may keep editing their own document, but never the fields that grant rights.
+export function privilegeRules(matchPath, pathVar, fields) {
+  const p = matchPath || '/users/{uid}';
+  const v = pathVar || 'uid';
+  const list = fields.map((f) => `'${f}'`).join(', ');
+  return [
+    `// ${p}: users may edit their own document, but not ${fields.join(', ')}`,
+    `match ${p} {`,
+    `  allow read: if request.auth != null && request.auth.uid == ${v};`,
+    `  allow create: if request.auth != null && request.auth.uid == ${v}`,
+    `    && !request.resource.data.keys().hasAny([${list}]);`,
+    `  allow update: if request.auth != null && request.auth.uid == ${v}`,
+    `    && !request.resource.data.diff(resource.data).affectedKeys().hasAny([${list}]);`,
+    `  allow delete: if request.auth != null && request.auth.uid == ${v};`,
+    `}`,
+    `// Set ${fields.join(', ')} only from trusted code (Admin SDK in a Cloud Function), or use`,
+    '// custom claims (request.auth.token.admin) — users cannot change those at all.',
+  ].join('\n');
+}

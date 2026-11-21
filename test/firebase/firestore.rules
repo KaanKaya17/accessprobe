@@ -3,6 +3,10 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function isAdmin() {
+      return get(/databases/$(database)/documents/members/$(request.auth.uid)).data.role == 'admin';
+    }
+
     // LEAK: any signed-in user can read every profile. Writes are owner-only.
     match /profiles/{uid} {
       allow read: if request.auth != null;
@@ -60,6 +64,27 @@ service cloud.firestore {
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.keys().hasOnly(['ownerId', 'title'])
         && request.resource.data.title is string;
+    }
+
+    // ESCALATION: members/{uid}.role == 'admin' unlocks admin_reports, but users may
+    // write every field of their own members document, role included.
+    match /members/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+    match /admin_reports/{id} {
+      allow read: if isAdmin();
+    }
+
+    // CORRECT: same pattern, but users cannot touch isStaff.
+    match /staff/{uid} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null && request.auth.uid == uid
+        && !request.resource.data.keys().hasAny(['isStaff']);
+      allow update: if request.auth != null && request.auth.uid == uid
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isStaff']);
+    }
+    match /staff_area/{id} {
+      allow read: if get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.isStaff == true;
     }
   }
 }

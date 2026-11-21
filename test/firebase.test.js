@@ -189,3 +189,15 @@ t('no test data or users are left behind; report renders rules fixes', () => {
   assert.match(md, /Fix \(Security Rules/);
   assert.match(md, /request\.resource\.data\.userId == request\.auth\.uid/);
 });
+
+t('self-escalation: users may set the field the rules use for admin rights', () => {
+  const f = result.findings.find((x) => x.resource === 'members' && x.id === 'self-escalation');
+  assert.ok(f && f.severity === 'critical', JSON.stringify(on('members')));
+  assert.match(f.detail, /role = "admin"/);
+  assert.match(f.fix.code, /affectedKeys\(\)\.hasAny\(\['role'\]\)/);
+});
+
+t('self-escalation: a rule that protects the field is a PASS', () => {
+  assert.ok(!on('staff').some((f) => f.id === 'self-escalation'), JSON.stringify(on('staff')));
+  assert.ok(passedFor('staff').includes('staff: users cannot set their own isStaff'), passedFor('staff').join('\n'));
+});

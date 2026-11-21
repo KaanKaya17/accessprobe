@@ -85,3 +85,20 @@ test('reads Android and iOS config files', () => {
   assert.equal(p.projectId, 'p2');
   assert.equal(fromGoogleServicesJson('{bad'), null);
 });
+
+test('privilegeFields: fields read from the caller\'s own document that grant rights', async () => {
+  const { privilegeFields } = await import('../src/providers/firebase/rules.js');
+  const rules = `service cloud.firestore { match /databases/{database}/documents {
+    function isAdmin() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'; }
+    match /reports/{id} { allow read: if isAdmin(); }
+    match /vip/{id} { allow read: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isPro; }
+    match /mods/{id} { allow read: if get(/databases/$(database)/documents/accounts/$(request.auth.uid)).data.tier in ["gold", "silver"]; }
+    match /x/{id} { allow read: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.banned != true; }
+  } }`;
+  const p = privilegeFields(parseRules(rules));
+  assert.deepEqual(p.get('users'), [
+    { field: 'role', value: 'admin' },
+    { field: 'isPro', value: true },
+  ]);
+  assert.deepEqual(p.get('accounts'), [{ field: 'tier', value: 'gold' }]);
+});

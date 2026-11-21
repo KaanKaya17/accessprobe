@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { decodeFields } from './client.js';
-import { parseRules, allowsFor, ownerField, ownerPathVar, staticFlags, collectionOf } from './rules.js';
+import { parseRules, allowsFor, ownerField, ownerPathVar, staticFlags, collectionOf, privilegeFields } from './rules.js';
 import * as fix from './fixes.js';
 
 const rand = () => Math.random().toString(36).slice(2, 8);
@@ -114,6 +114,7 @@ export async function probeFirestore(client, src, [A, B], { log }) {
   const left = [];
   let fullyTested = 0;
   const { targets, matches } = firestoreTargets(src);
+  const privFields = privilegeFields(matches);
   // A 403 from a project whose Firestore API is off (or App Check-enforced) looks like a rule
   // refusal. PASSes that rest only on such a refusal wait until some Firestore request succeeded.
   const pendingPass = [];
@@ -175,6 +176,7 @@ export async function probeFirestore(client, src, [A, B], { log }) {
       continue;
     }
     fullyTested++;
+    await probeEscalation(client, t, mine, A, privFields.get(t.collectionPath), { tf, passed: pendingPass, skipped });
     const ownedNow = owned || Boolean(mine.ownerField);
     const ownerDesc = t.ownerPathVar ? `path {${t.ownerPathVar}}` : mine.ownerField ? `field ${mine.ownerField}` : null;
     const rules = () => fix.ownerOnlyRules(t.match?.path || `/${t.collectionPath}/{${t.docVar}}`, mine.ownerField, t.ownerPathVar);
@@ -437,3 +439,34 @@ async function freshUserList(client, t, coll, B, { tf, passed, skipped, owned })
 }
 
 export { allowsFor };
+
+// The rules grant extra rights when the caller's own document says so
+// (get(/…/users/$(request.auth.uid)).data.role == 'admin'). Can A write that field itself?
+// A's test document is deleted during cleanup, so nothing has to be put back.
+async function probeEscalation(client, t, mine, A, fields, { tf, passed, skipped }) {
+  if (!fields?.length) return;
+  if (mine.path !== `${t.collectionPath}/${A.id}`) {
+    skipped.push(`${t.collectionPath}: rules read ${fields.map((f) => f.field).join(', ')} from users' own documents, but accessprobe could not create a document at ${t.collectionPath}/<uid> to test it`);
+    return;
+  }
+  const changed = [];
+  let evidence = null;
+  for (const { field, value } of fields) {
+    const r = await client.updateDoc(mine.path, { [field]: value }, { token: A.token });
+    if (ok(r)) {
+      changed.push(`${field} = ${JSON.stringify(value)}`);
+      evidence ??= `as user A on its own document: ${r.evidence}`;
+    } else if (denied(r)) passed.push(`${t.collectionPath}: users cannot set their own ${field}`);
+    else skipped.push(`${t.collectionPath}: ${field} change test inconclusive (${r.status} ${msg(r.data)})`);
+  }
+  if (!changed.length) return;
+  const names = changed.map((c) => c.split(' =')[0]);
+  tf({
+    id: 'self-escalation',
+    severity: 'critical',
+    title: `Users can give themselves extra rights: they may set ${names.join(', ')} on their own "${t.collectionPath}" document`,
+    detail: `Proven: user A set ${changed.join(', ')} on its own document. Your rules grant extra access when that field has this value, so any user can unlock it for themselves.`,
+    evidence,
+    fix: { code: fix.privilegeRules(t.match?.path, t.ownerPathVar, names) },
+  });
+}

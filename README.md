@@ -69,7 +69,8 @@ The skill tells the agent to:
 | Area | Check |
 |---|---|
 | Site bundle | Supabase URL + anon key discovery; leaked `service_role` / `sb_secret_` / Stripe / OpenAI / AWS keys |
-| Tables | anonymous read, anonymous write (RLS off), **B reads A's row**, **B updates A's row**, **B takes A's row over** (sets the owner to itself), **B deletes A's row**, **B inserts a row as A** |
+| Tables | anonymous read, anonymous write (RLS off), **B reads A's row**, **B updates A's row**, **B takes A's row over** (sets the owner to itself), **B deletes A's row**, **B inserts a row as A**, **users make themselves admin** (change `role`, `is_admin`, `plan`, `credits`… on their own row; the old value is put back) |
+| Views | **views that skip RLS**: B (and anonymous visitors) look for A's private test rows in every view. Views without `security_invoker` run with the owner's rights |
 | Storage | anonymous listing, **B downloads A's file**, **B deletes A's file**, public buckets via their public URL |
 | Project config | secret keys in browser-exposed env vars (`VITE_`, `NEXT_PUBLIC_`, `EXPO_PUBLIC_` …) or in client code |
 | Functions | lists RPCs exposed over the API for review (never calls them) |
@@ -79,7 +80,7 @@ The skill tells the agent to:
 | Area | Check |
 |---|---|
 | Config | `firebaseConfig` in the site bundle, `google-services.json`, `GoogleService-Info.plist`; leaked service-account keys and FCM server keys |
-| Firestore | **B reads / lists / modifies / takes over / deletes A's documents**, **B creates a document in A's name**, anonymous read and write. Owner fields, `{uid}` path ownership and validator schemas (`hasOnly`, `is string`) are read from `firestore.rules` |
+| Firestore | **B reads / lists / modifies / takes over / deletes A's documents**, **B creates a document in A's name**, anonymous read and write. Owner fields, `{uid}` path ownership and validator schemas (`hasOnly`, `is string`) are read from `firestore.rules`. **Users make themselves admin**: when your rules grant rights from the caller's own document (`get(/…/users/$(request.auth.uid)).data.role == 'admin'`), A tries to set that field itself |
 | Realtime Database | anonymous read of the root, **B reads / overwrites A's node** (`users/$uid`), **anyone lists every entry** of a node (user ids, backup codes…), open nodes. Paths come from the rules, or from your code when the rules only live in the console |
 | Storage | **B downloads / lists / deletes A's files**, anonymous download |
 | Rules file | test-mode time limits (`request.time < timestamp.date(…)`), `{document=**}` catch-alls |
@@ -184,6 +185,7 @@ project. It asks you to confirm ownership before every run unless you pass `--ye
 - [ ] MCP server: agents run it after every schema change
 - [ ] Edge Function checks (auth required? cross-user IDs?)
 - [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)
+- [x] Privilege escalation (users editing their own `role` / `plan`) and views that skip RLS
 - [ ] PocketBase, Appwrite: same two-user engine, one adapter each
 
 ## Contributing

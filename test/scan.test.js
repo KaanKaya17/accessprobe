@@ -100,6 +100,42 @@ test('varchar(18) marker column: same-length tampering, correct policy proven', 
   assert.equal(result.findings.filter((f) => f.table === 'short_codes').length, 0);
 });
 
+test('self-escalation: "update own row" that also covers plan / is_admin is critical', () => {
+  const f = result.findings.find((x) => x.table === 'memberships' && x.id === 'self-escalation');
+  assert.ok(f && f.severity === 'critical', JSON.stringify(result.findings.filter((x) => x.table === 'memberships')));
+  assert.match(f.title, /plan/);
+  assert.match(f.title, /is_admin/);
+  assert.match(f.detail, /put back/);
+  // fix: column grants that leave plan / is_admin out
+  assert.match(f.fix.sql, /revoke update on public\."memberships" from anon, authenticated;/);
+  assert.match(f.fix.sql, /grant update \("user_id", "nickname"\) on public\."memberships" to authenticated;/);
+  // the row-ownership tests still pass there: escalation is a separate problem
+  assert.ok(result.passed.includes("memberships: B cannot read A's rows"));
+});
+
+test('self-escalation: a column the user may not update is a PASS, proven by a refusal', () => {
+  assert.ok(!result.findings.some((x) => x.table === 'subscriptions'));
+  assert.ok(result.passed.includes('subscriptions: users cannot change their own plan'));
+});
+
+test('views: a view without security_invoker that shows rows RLS hides is proven', () => {
+  const f = result.findings.find((x) => x.table === 'notes_feed' && x.id === 'view-bypass');
+  assert.ok(f && f.severity === 'critical', JSON.stringify(result.findings.filter((x) => x.table === 'notes_feed')));
+  assert.match(f.detail, /"notes" hides A's test row/);
+  assert.match(f.fix.sql, /alter view public\."notes_feed" set \(security_invoker = true\);/);
+  // the anonymous read of the view gets a view fix, never "create policy" on a view (invalid SQL)
+  const anonView = result.findings.find((x) => x.table === 'notes_feed' && x.id === 'anon-read-owned');
+  assert.ok(anonView && /security_invoker = true/.test(anonView.fix.sql) && !/create policy/.test(anonView.fix.sql));
+  // the base table itself is still clean
+  assert.equal(result.findings.filter((x) => x.table === 'notes').length, 0);
+});
+
+test('views: a security_invoker view passes for B and for anonymous visitors', () => {
+  assert.ok(!result.findings.some((x) => x.table === 'my_notes'));
+  assert.ok(result.passed.includes("my_notes: B cannot read A's private rows through it"));
+  assert.ok(result.passed.includes("my_notes: anonymous visitors cannot read A's private rows through it"));
+});
+
 test('public bucket is info, not a cross-user leak', () => {
   assert.ok(has('storage-public-bucket', 'public-assets'));
   assert.ok(!has('storage-cross-user-read', 'public-assets'));

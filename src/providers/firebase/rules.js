@@ -140,3 +140,29 @@ export function collectionOf(match) {
   if (!dv || last.includes('=**')) return null;
   return { collectionPath: parts.slice(0, -1).join('/'), docVar: dv[1] };
 }
+
+// Fields that grant extra rights, read from the caller's own document:
+//   get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+// -> Map { "users" => [{ field: "role", value: "admin" }] }
+// If users can write that field on their own document, they can give themselves those rights.
+export function privilegeFields(matches) {
+  const out = new Map();
+  const re =
+    /get\(\s*\/databases\/\$\(database\)\/documents\/([\w/]+?)\/\$\(request\.auth\.uid\)\s*\)\.data\.(\w+)(\s*(==|!=|in)\s*('([^']*)'|"([^"]*)"|true|false|\[\s*['"]([^'"]+)['"]))?/g;
+  for (const m of matches) {
+    for (const a of m.allows) {
+      for (const x of a.cond.matchAll(re)) {
+        const [, coll, field, cmp, op, lit, sq, dq, first] = x;
+        let value;
+        if (!cmp) value = true; // truthy check: .data.isAdmin
+        else if (op === '!=' || lit === 'false') continue; // can't tell which value grants more
+        else value = sq ?? dq ?? first ?? (lit === 'true' ? true : undefined);
+        if (value === undefined) continue;
+        const list = out.get(coll) || [];
+        if (!list.some((p) => p.field === field)) list.push({ field, value });
+        out.set(coll, list);
+      }
+    }
+  }
+  return out;
+}
