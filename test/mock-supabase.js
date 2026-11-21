@@ -1,0 +1,341 @@
+// A deliberately VULNERABLE fake Supabase (PostgREST + Auth + Storage subset)
+// with the mistakes AI app builders make most often. Used by tests and `npm run demo`.
+//
+//   profiles   — policy "authenticated can read all"        → cross-user read
+//   orders     — read all + insert without owner check      → cross-user read + impersonation
+//   notes      — correct owner-only policies                → should PASS
+//   products   — public catalog, anon read                  → warning only
+//   api_logs   — RLS disabled                               → anon read/write
+//   avatars    — bucket: anon can list, anyone can download → storage leaks
+//   documents  — bucket: owner folder only                  → should PASS
+//   site JS    — ships the service_role key                 → leaked key
+
+import { randomUUID } from 'node:crypto';
+import http from 'node:http';
+import { pathToFileURL } from 'node:url';
+
+const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+const jwt = (payload) => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64(payload)}.${'s'.repeat(43)}`;
+const parse = (t) => {
+  try {
+    return JSON.parse(Buffer.from(t.split('.')[1], 'base64url').toString());
+  } catch {
+    return null;
+  }
+};
+
+export const ANON_KEY = jwt({ iss: 'supabase', ref: 'mockmockmockmockmock', role: 'anon' });
+export const SERVICE_KEY = jwt({ iss: 'supabase', ref: 'mockmockmockmockmock', role: 'service_role' });
+
+const own = (ctx, row, col = 'user_id') => ctx.uid && row[col] === ctx.uid;
+const authed = (ctx) => ctx.role === 'authenticated';
+
+function makeState() {
+  const u1 = randomUUID();
+  const u2 = randomUUID();
+  // like FitLog's current_user_id(): auth.uid() → app_users.user_id
+  const appId = (c) => c.uid && S.tables.app_users.rows.find((r) => r.auth_id === c.uid)?.user_id;
+  const mineApp = (c, r) => appId(c) !== undefined && String(r.user_id) === String(appId(c));
+  const ownApp = () => ({ select: mineApp, insert: mineApp, update: mineApp, delete: mineApp });
+  const S = {
+    users: new Map(), // email -> {id, password}
+    tables: {
+      profiles: {
+        columns: { id: ['uuid', { pk: true, required: true, fk: 'users' }], email: ['text'], full_name: ['text'] },
+        rls: {
+          select: (c) => authed(c), // BUG: auth.role() = 'authenticated'
+          insert: (c, r) => own(c, r, 'id'),
+          update: (c, r) => own(c, r, 'id'),
+          delete: (c, r) => own(c, r, 'id'),
+        },
+        rows: [
+          { id: u1, email: 'alice@real-customer.com', full_name: 'Alice' },
+          { id: u2, email: 'bob@real-customer.com', full_name: 'Bob' },
+        ],
+      },
+      orders: {
+        columns: {
+          id: ['uuid', { pk: true, default: true }],
+          user_id: ['uuid', { required: true }],
+          total: ['numeric', { required: true }],
+          note: ['text'],
+        },
+        rls: {
+          select: (c) => authed(c), // BUG
+          insert: (c) => authed(c), // BUG: no "with check (user_id = auth.uid())"
+          update: (c, r) => own(c, r),
+          delete: (c, r) => own(c, r),
+        },
+        rows: [{ id: randomUUID(), user_id: u1, total: 120, note: 'real order' }],
+      },
+      notes: {
+        columns: {
+          id: ['bigint', { pk: true, default: true }],
+          user_id: ['uuid', { required: true }],
+          body: ['text', { required: true }],
+        },
+        rls: {
+          select: (c, r) => own(c, r),
+          insert: (c, r) => own(c, r),
+          update: (c, r) => own(c, r),
+          delete: (c, r) => own(c, r),
+        },
+        rows: [{ id: 1, user_id: u1, body: 'private note' }],
+      },
+      products: {
+        columns: { id: ['bigint', { pk: true, default: true }], name: ['text', { required: true }], price: ['numeric'] },
+        rls: { select: () => true, insert: () => false, update: () => false, delete: () => false },
+        rows: [{ id: 1, name: 'T-shirt', price: 20 }],
+      },
+      // FitLog-style: own users table with bigint ids, other tables point at it
+      app_users: {
+        columns: { user_id: ['bigint', { pk: true, default: true }], auth_id: ['uuid'], email: ['text'] },
+        rls: {
+          select: (c, r) => c.uid && r.auth_id === c.uid,
+          insert: () => false,
+          update: () => false,
+          delete: () => false,
+        },
+        rows: [{ user_id: 1, auth_id: u1, email: 'alice@real-customer.com' }],
+      },
+      workouts: {
+        columns: {
+          id: ['bigint', { pk: true, default: true }],
+          user_id: ['bigint', { required: true, fk: 'app_users', fkCol: 'user_id' }],
+          name: ['text', { required: true }],
+        },
+        rls: ownApp(),
+        rows: [{ id: 1, user_id: 1, name: 'leg day' }],
+      },
+      messages: {
+        columns: {
+          id: ['bigint', { pk: true, default: true }],
+          user_id: ['bigint', { required: true, fk: 'app_users', fkCol: 'user_id' }],
+          body: ['text', { required: true }],
+        },
+        rls: { ...ownApp(), select: (c) => authed(c) }, // BUG: read-all
+        rows: [{ id: 1, user_id: 1, body: 'hi' }],
+      },
+      api_logs: {
+        columns: { id: ['bigint', { pk: true, default: true }], message: ['text'], ip: ['text'] },
+        rls: null, // RLS DISABLED
+        rows: [{ id: 1, message: 'login', ip: '1.2.3.4' }],
+      },
+      // intended: strangers may sign the guestbook and read it, but not delete entries
+      guestbook: {
+        columns: { id: ['bigint', { pk: true, default: true }], message: ['text', { required: true }] },
+        rls: { select: () => true, insert: () => true, update: () => false, delete: () => false },
+        rows: [],
+      },
+      // no primary key and no text column: rlsprobe must not guess a filter
+      counters: {
+        columns: { user_id: ['uuid', { required: true }], value: ['integer'] },
+        rls: {
+          select: (c, r) => own(c, r),
+          insert: (c, r) => own(c, r),
+          update: (c, r) => own(c, r),
+          delete: (c, r) => own(c, r),
+        },
+        rows: [],
+      },
+    },
+    seq: 100,
+    buckets: {
+      avatars: {
+        list: () => true, // BUG: anon can list
+        read: () => true, // BUG: anyone can read
+        insert: (c, p) => c.uid && p.startsWith(`${c.uid}/`),
+        delete: (c, p) => c.uid && p.startsWith(`${c.uid}/`),
+        objects: new Map([[`${u1}/face.png`, 'png']]),
+      },
+      documents: {
+        list: (c, prefix) => c.uid && prefix.startsWith(c.uid),
+        read: (c, p) => c.uid && p.startsWith(`${c.uid}/`),
+        insert: (c, p) => c.uid && p.startsWith(`${c.uid}/`),
+        delete: (c, p) => c.uid && p.startsWith(`${c.uid}/`),
+        objects: new Map([[`${u1}/contract.pdf`, 'pdf']]),
+      },
+      'public-assets': {
+        public: true, // reading by URL is the point
+        list: () => false,
+        read: () => true,
+        insert: (c, p) => c.uid && p.startsWith(`${c.uid}/`),
+        delete: (c, p) => c.uid && p.startsWith(`${c.uid}/`),
+        objects: new Map(),
+      },
+    },
+  };
+  return S;
+}
+
+function openapi(S) {
+  const definitions = {};
+  const paths = { '/': {}, '/rpc/delete_everything': { post: {} } };
+  for (const [name, t] of Object.entries(S.tables)) {
+    const properties = {};
+    const required = [];
+    for (const [col, [format, o = {}]] of Object.entries(t.columns)) {
+      let description = '';
+      if (o.pk) description += 'Note:\nThis is a Primary Key.<pk/>';
+      if (o.fk) description += `\nThis is a Foreign Key to \`${o.fk}.id\`.<fk table='${o.fk}' column='${o.fkCol || 'id'}'/>`;
+      properties[col] = { format, type: /uuid|text/.test(format) ? 'string' : format === 'bigint' ? 'integer' : 'number', ...(description && { description }) };
+      if (o.default) properties[col].default = 'gen';
+      if (o.required) required.push(col);
+    }
+    definitions[name] = { type: 'object', properties, required };
+    paths[`/${name}`] = { get: {}, post: {}, patch: {}, delete: {} };
+  }
+  return { swagger: '2.0', info: { title: 'mock' }, paths, definitions };
+}
+
+function ctxFrom(req) {
+  const auth = (req.headers.authorization || '').replace(/^Bearer /, '');
+  const p = parse(auth);
+  if (!p) return { role: 'anon' };
+  if (p.role === 'service_role') return { role: 'service_role', bypass: true };
+  return { role: p.role, uid: p.sub };
+}
+
+const allow = (t, op, ctx, row) => ctx.bypass || !t.rls || t.rls[op](ctx, row);
+
+function filters(sp) {
+  const fs = [];
+  for (const [k, v] of sp) {
+    if (['select', 'limit', 'offset', 'order'].includes(k)) continue;
+    const m = v.match(/^(eq|neq)\.(.*)$/);
+    if (m) fs.push((row) => (m[1] === 'eq' ? String(row[k]) === m[2] : String(row[k]) !== m[2]));
+  }
+  return (row) => fs.every((f) => f(row));
+}
+
+async function body(req) {
+  let s = '';
+  for await (const ch of req) s += ch;
+  return s;
+}
+
+export function createServer() {
+  const S = makeState();
+  const site = `<!doctype html><html><head><script type="module" src="/assets/index-abc123.js"></script></head><body><div id="root"></div></body></html>`;
+
+  return http.createServer(async (req, res) => {
+    const port = req.socket.localPort;
+    const send = (status, data, headers = {}) => {
+      res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
+      res.end(data === undefined ? '' : typeof data === 'string' ? data : JSON.stringify(data));
+    };
+    const u = new URL(req.url, `http://localhost:${port}`);
+    const ctx = ctxFrom(req);
+
+    // ---------- the "deployed app" ----------
+    if (u.pathname === '/') return send(200, site, { 'Content-Type': 'text/html' });
+    if (u.pathname.startsWith('/assets/')) {
+      const js = `import{createClient as c}from"./vendor.js";const sb=c("http://localhost:${port}","${ANON_KEY}");const admin=c("http://localhost:${port}","${SERVICE_KEY}");export{sb,admin};`;
+      return send(200, js, { 'Content-Type': 'application/javascript' });
+    }
+
+    // ---------- auth ----------
+    if (u.pathname === '/auth/v1/signup' && req.method === 'POST') {
+      const { email, password } = JSON.parse(await body(req));
+      if (S.users.has(email)) return send(422, { msg: 'User already registered' });
+      const id = randomUUID();
+      S.users.set(email, { id, password });
+      S.tables.app_users.rows.push({ user_id: ++S.seq, auth_id: id, email }); // signup trigger
+      return send(200, { id, email });
+    }
+    if (u.pathname === '/auth/v1/token' && req.method === 'POST') {
+      const { email, password } = JSON.parse(await body(req));
+      const user = S.users.get(email);
+      if (!user || user.password !== password) return send(400, { error: 'invalid_grant', error_description: 'Invalid login credentials' });
+      return send(200, { access_token: jwt({ sub: user.id, role: 'authenticated', email }), user: { id: user.id, email } });
+    }
+
+    // ---------- PostgREST ----------
+    if (u.pathname === '/rest/v1/' && req.method === 'GET') return send(200, openapi(S));
+    const tm = u.pathname.match(/^\/rest\/v1\/([a-z_]+)$/);
+    if (tm) {
+      const t = S.tables[tm[1]];
+      if (!t) return send(404, { code: '42P01', message: `relation "public.${tm[1]}" does not exist` });
+      const match = filters(u.searchParams);
+      const ret = (req.headers.prefer || '').includes('return=representation');
+
+      if (req.method === 'GET') {
+        const visible = t.rows.filter((r) => allow(t, 'select', ctx, r) && match(r));
+        const limit = Number(u.searchParams.get('limit') || 1000);
+        const page = visible.slice(0, limit);
+        return send(200, page, { 'Content-Range': `${page.length ? `0-${page.length - 1}` : '*'}/${visible.length}` });
+      }
+      if (req.method === 'POST') {
+        const row = JSON.parse(await body(req));
+        for (const [col, [format, o = {}]] of Object.entries(t.columns)) {
+          if (row[col] === undefined && o.default) row[col] = format === 'uuid' ? randomUUID() : ++S.seq;
+          if (row[col] === undefined && o.required) return send(400, { code: '23502', message: `null value in column "${col}"` });
+        }
+        if (!allow(t, 'insert', ctx, row))
+          return send(403, { code: '42501', message: `new row violates row-level security policy for table "${tm[1]}"` });
+        t.rows.push(row);
+        return send(201, ret ? [row] : undefined);
+      }
+      if (req.method === 'PATCH') {
+        const patch = JSON.parse(await body(req));
+        const hit = t.rows.filter((r) => allow(t, 'select', ctx, r) && allow(t, 'update', ctx, r) && match(r));
+        hit.forEach((r) => Object.assign(r, patch));
+        return send(200, ret ? hit : undefined);
+      }
+      if (req.method === 'DELETE') {
+        const hit = t.rows.filter((r) => allow(t, 'select', ctx, r) && allow(t, 'delete', ctx, r) && match(r));
+        t.rows = t.rows.filter((r) => !hit.includes(r));
+        return send(200, ret ? hit : undefined);
+      }
+    }
+
+    // ---------- Storage ----------
+    if (u.pathname === '/storage/v1/bucket' && req.method === 'GET') {
+      return send(200, ctx.uid ? Object.entries(S.buckets).map(([n, b]) => ({ id: n, name: n, public: Boolean(b.public) })) : []);
+    }
+    let m = u.pathname.match(/^\/storage\/v1\/object\/list\/([^/]+)$/);
+    if (m && req.method === 'POST') {
+      const b = S.buckets[m[1]];
+      if (!b) return send(404, { error: 'Bucket not found' });
+      const { prefix = '' } = JSON.parse(await body(req));
+      if (!b.list(ctx, prefix)) return send(200, []);
+      const names = [...b.objects.keys()].filter((p) => p.startsWith(prefix)).map((p) => ({ name: p.slice(prefix.length).replace(/^\//, '') }));
+      return send(200, names);
+    }
+    m = u.pathname.match(/^\/storage\/v1\/object\/authenticated\/([^/]+)\/(.+)$/);
+    if (m && req.method === 'GET') {
+      const b = S.buckets[m[1]];
+      const p = decodeURIComponent(m[2]);
+      if (!b || !b.objects.has(p) || !b.read(ctx, p)) return send(400, { error: 'not_found', message: 'Object not found' });
+      return send(200, b.objects.get(p), { 'Content-Type': 'text/plain' });
+    }
+    m = u.pathname.match(/^\/storage\/v1\/object\/([^/]+)\/(.+)$/);
+    if (m && req.method === 'POST') {
+      const b = S.buckets[m[1]];
+      const p = decodeURIComponent(m[2]);
+      const content = await body(req);
+      if (!b || !b.insert(ctx, p)) return send(400, { statusCode: '403', error: 'Unauthorized', message: 'new row violates row-level security policy' });
+      b.objects.set(p, content);
+      return send(200, { Key: `${m[1]}/${p}` });
+    }
+    m = u.pathname.match(/^\/storage\/v1\/object\/([^/]+)$/);
+    if (m && req.method === 'DELETE') {
+      const b = S.buckets[m[1]];
+      const { prefixes = [] } = JSON.parse(await body(req));
+      const done = prefixes.filter((p) => b && b.objects.has(p) && b.delete(ctx, p));
+      done.forEach((p) => b.objects.delete(p));
+      return send(200, done.map((name) => ({ name })));
+    }
+
+    send(404, { message: 'not found' });
+  });
+}
+
+// `node test/mock-supabase.js` → starts the demo on :54399
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  const port = Number(process.env.PORT || 54399);
+  createServer().listen(port, () => {
+    console.log(`Vulnerable demo app + fake Supabase on http://localhost:${port}`);
+    console.log('Now run:  npm run demo');
+  });
+}
