@@ -41,6 +41,12 @@ export async function scan(opts, { site, log }) {
     if (opts[flag]) src[key] = await readFile(opts[flag], 'utf8');
   }
   cfg = fromSite.configs[0] || src.configs[0] || null;
+  if (opts.projectId && cfg && cfg.projectId !== opts.projectId) {
+    // the found config belongs to ANOTHER project: its database URL / bucket would point at the
+    // wrong store (in the emulator: a fresh, rule-less namespace that makes everything look open)
+    notes.push(`--project-id "${opts.projectId}" differs from the config found (${cfg.projectId}); its databaseURL and storageBucket were ignored.`);
+    cfg = { apiKey: cfg.apiKey, projectId: opts.projectId };
+  }
   if (opts.apiKey || opts.projectId) cfg = { ...(cfg || {}), ...(opts.apiKey && { apiKey: opts.apiKey }), ...(opts.projectId && { projectId: opts.projectId }) };
   if (!cfg?.apiKey || !cfg?.projectId) throw new Error('Firebase apiKey / projectId not found. Pass --api-key and --project-id, or --site / --source.');
   if (fromSite.configs.length + src.configs.length > 1) notes.push(`Several Firebase configs found, using project "${cfg.projectId}".`);

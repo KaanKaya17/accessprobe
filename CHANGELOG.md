@@ -20,6 +20,9 @@ All notable changes to this project are documented here. The format follows
 - Recipient-keyed nodes (invite inboxes) report overwrites as a warning with create-only advice.
 - A record read back from RTDB is compared regardless of key order. RTDB sorts keys, which used to make A's own write look failed.
 - Public-looking node names (presence, leaderboard) now lower the severity of read findings only. Another user overwriting your data is always critical.
+- If `--project-id` doesn't match the project in a config file, that file's database URL and bucket are ignored. Before, this could point rlsprobe at the wrong database.
+- New guard: if the rules you pass lock the root but the root is readable, rlsprobe is not talking to the database those rules belong to. Realtime Database results are then discarded instead of reported. Found while testing a rules fix in the emulator.
+- Each "passed" line and note is reported only once.
 
 ## [0.2.0] - 2026-11-21
 

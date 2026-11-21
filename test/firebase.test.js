@@ -12,6 +12,8 @@ let emu = null;
 let result = null;
 let codeOnly = null;
 let codeAndRules = null;
+let wrongProject = null;
+let wrongNs = null;
 const CODE_ONLY = fileURLToPath(new URL('./firebase-app-code/', import.meta.url));
 let skipReason = available() ? null : 'Java/npx not available';
 
@@ -35,6 +37,9 @@ before(async () => {
   // same emulator, but an app folder with NO rules files: paths come from Java code only
   codeOnly = await scan({ platform: 'firebase', projectId: PROJECT_ID, apiKey: 'fake-api-key', source: CODE_ONLY, emulator: true, quiet: true });
   // app code + rules exported from the console (the real-world setup that found the inbox gap)
+  const RULES = fileURLToPath(new URL('./firebase/database.rules.json', import.meta.url));
+  wrongProject = await scan({ platform: 'firebase', projectId: PROJECT_ID, apiKey: 'k', source: fileURLToPath(new URL('./firebase-wrong-project/', import.meta.url)), databaseRules: RULES, emulator: true, quiet: true });
+  wrongNs = await scan({ platform: 'firebase', source: fileURLToPath(new URL('./firebase-wrong-ns/', import.meta.url)), databaseRules: RULES, emulator: true, quiet: true });
   codeAndRules = await scan({
     platform: 'firebase',
     projectId: PROJECT_ID,
@@ -145,6 +150,17 @@ t('rules without key level + code with it: the inbox structure from code is test
   assert.ok(inv.some((f) => f.id === 'rtdb-cross-user-read' && f.severity === 'critical'), JSON.stringify(inv.map((f) => f.id)));
   assert.ok(inv.some((f) => f.id === 'rtdb-cross-user-write' && f.severity === 'warning'), 'inbox overwrite is a warning');
   assert.ok(codeAndRules.notes.some((n) => /path\(s\) from the app code were added/.test(n)));
+});
+
+t('--project-id wins over a config file from another project (no wrong database)', () => {
+  assert.ok(wrongProject.notes.some((n) => /differs from the config found \(some-other-project\)/.test(n)));
+  assert.ok(!wrongProject.findings.some((f) => f.id === 'rtdb-anon-root'), 'must not hit a rule-less namespace');
+  assert.ok(wrongProject.findings.some((f) => f.id === 'rtdb-cross-user-read' && f.resource === 'users/$uid'), 'tested the real (rules-enforcing) database');
+});
+
+t('rules lock the root but the root is readable → wrong database detected, RTDB results discarded', () => {
+  assert.ok(wrongNs.notes.some((n) => /probably talking to a different database/.test(n)), wrongNs.notes.join('\n'));
+  assert.ok(!wrongNs.findings.some((f) => f.id.startsWith('rtdb-')), 'no RTDB findings from the wrong database');
 });
 
 t('no test data or users are left behind; report renders rules fixes', () => {

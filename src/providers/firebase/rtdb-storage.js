@@ -65,6 +65,24 @@ export async function probeRtdb(client, src, [A, B], { log }) {
     });
   } else if (deniedRtdb(root)) passed.push('Realtime Database: anonymous visitors cannot read the root');
 
+  // sanity check: the rules we were given lock the root, yet the root is readable → we are not
+  // talking to the database those rules belong to (wrong instance / namespace / region)
+  if (ok(root) && src.databaseRules) {
+    let rootRead;
+    try {
+      rootRead = JSON.parse(src.databaseRules.replace(/\/\/[^\n]*/g, '')).rules?.['.read'];
+    } catch {
+      rootRead = undefined;
+    }
+    if (rootRead === undefined || rootRead === false || rootRead === 'false') {
+      findings.pop();
+      skipped.push(
+        `Realtime Database: the root is readable, but the rules you gave lock it — rlsprobe is probably talking to a different database (instance / namespace: ${client.ep.databaseNs || client.ep.database}). Realtime Database results were discarded.`,
+      );
+      return { findings: [], passed: [], skipped, left, fullyTested: 0, count: 0 };
+    }
+  }
+
   const targets = mergeTargets(src.databaseRules ? rtdbTargets(src.databaseRules) : [], src.rtdbCodePaths || []);
   const fromCode = targets.filter((t) => t.fromCode).length;
   if (!src.databaseRules) {
