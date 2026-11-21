@@ -2,8 +2,8 @@
 import { parseArgs } from 'node:util';
 import { writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
-import { scan } from '../src/scan.js';
-import { printReport, markdownReport, grade, color } from '../src/report.js';
+import { scan } from '../src/core/scan.js';
+import { printReport, markdownReport, grade, color } from '../src/core/report.js';
 
 const HELP = `
 rlsprobe — prove your Supabase Row Level Security actually works
@@ -13,8 +13,9 @@ Usage
   npx rlsprobe --url https://xyz.supabase.co --anon-key eyJ...
 
 Options
-  --site <url>           Your deployed app. Finds the Supabase URL + anon key in its JS
+  --site <url>           Your deployed app. Finds the backend config in its JS
                          and checks the bundle for leaked secret keys.
+  --platform <name>      Force a backend (default: auto-detect). Supported: supabase
   --url <url>            Supabase project URL (skip discovery)
   --anon-key <key>       Public anon / publishable key
   --source <dir>         Your project folder. Reads tables + columns from
@@ -51,6 +52,7 @@ const OPTIONS = {
   'email-domain': { type: 'string' },
   'cleanup-rpc': { type: 'string' },
   source: { type: 'string' },
+  platform: { type: 'string' },
   table: { type: 'string', multiple: true },
   only: { type: 'string', multiple: true },
   bucket: { type: 'string', multiple: true },
@@ -99,6 +101,7 @@ try {
     emailDomain: v['email-domain'],
     cleanupRpc: v['cleanup-rpc'],
     source: v.source,
+    platform: v.platform,
     tables: v.table,
     only: v.only,
     buckets: v.bucket,

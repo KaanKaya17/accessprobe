@@ -1,28 +1,41 @@
 import { SupabaseClient, decodeJwt } from './client.js';
-import { discover } from './discover.js';
+import { extract } from './discover.js';
 import { parseSchema } from './schema.js';
 import { scanSource, sourceToDefinitions } from './source.js';
 import { setupUsers, resolveIdentities, probeTables, probeStorage, rpcReview, cleanupRows, msg } from './probes.js';
 
 const CLEANUP_RPC_HINT = /^(delete_(my_)?(own_)?(account|user|profile)|delete_me)$/i;
 
-export async function scan(opts) {
-  const log = opts.quiet ? () => {} : (m) => console.error(m);
+export const id = 'supabase';
+export const label = 'Supabase';
+
+// Is this app a Supabase app? Explicit flags, config in the site bundle, or a supabase/ folder.
+export async function detect(opts, { site }) {
+  if (opts.url || opts.anonKey) return true;
+  if (site && extract(site.sources).anonKeys.length) return true;
+  if (opts.source) {
+    const { existsSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    return existsSync(join(opts.source, 'supabase'));
+  }
+  return false;
+}
+
+export async function scan(opts, { site, log }) {
   const t0 = Date.now();
   const findings = [];
   const passed = [];
   const notes = [];
   let { url, anonKey } = opts;
 
-  // 1. discovery from the live site
-  if (opts.site) {
-    log(`→ Looking for Supabase config in ${opts.site}`);
-    const d = await discover(opts.site, { log });
+  // 1. config from the live site (already fetched by core)
+  if (site) {
+    log(`→ Looking for Supabase config in ${site.url}`);
+    const d = extract(site.sources);
     findings.push(...d.findings);
     url ||= d.urls[0];
     anonKey ||= d.anonKeys[0];
     if (d.urls.length > 1) notes.push(`Multiple Supabase URLs found, using ${url}: ${d.urls.join(', ')}`);
-    if (!d.findings.length) passed.push(`No secret keys found in ${d.scanned.length} file(s) of the site's JavaScript`);
   }
   if (!url || !anonKey) {
     throw new Error('Supabase URL / anon key not found. Pass them with --url and --anon-key.');
@@ -86,6 +99,13 @@ export async function scan(opts) {
       passed,
       notes,
       stats: {
+        resources: schema.tables.length,
+        resourceLabel: 'tables',
+        summary: [
+          [schema.tables.length, 'tables'],
+          [storage.count, 'buckets'],
+          [schema.rpcs.length, 'functions'],
+        ],
         tables: schema.tables.length,
         fullyTested: tables.fullyTested,
         readOnly: tables.readOnly,

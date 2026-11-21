@@ -1,8 +1,8 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, ANON_KEY } from './mock-supabase.js';
-import { scan } from '../src/scan.js';
-import { grade, markdownReport } from '../src/report.js';
+import { scan } from '../src/core/scan.js';
+import { grade, markdownReport } from '../src/core/report.js';
 
 let server;
 let base;

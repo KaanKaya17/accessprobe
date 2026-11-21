@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { scanSource, sourceToDefinitions } from '../src/source.js';
-import { parseSchema } from '../src/schema.js';
+import { scanSource, sourceToDefinitions } from '../src/providers/supabase/source.js';
+import { parseSchema } from '../src/providers/supabase/schema.js';
 
 test('reads tables, columns, keys and RPCs from migrations + app code', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'rlsprobe-'));
