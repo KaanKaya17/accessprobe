@@ -19,7 +19,7 @@ jobs:
       RLSPROBE_SKIP_FIREBASE: ${{ matrix.node != 22 && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
       - uses: actions/setup-java@v4
