@@ -99,6 +99,11 @@ export async function probeRtdb(client, src, [A, B], { log }) {
     // ".validate": "newData.hasChildren([...])" on the user's node → write a record of that shape
     // at the node itself; otherwise a plain value under a fresh child key
     const shape = t.ownerVar ? shapeFromValidate(t.validate, marker) : null;
+    if (shape && !A.created) {
+      // the shaped record replaces the user's whole node: never do that to a real account (--user-a)
+      skipped.push(`Realtime Database /${t.path}: skipped — testing it would overwrite user A's whole node, and A is a real account (--user-a)`);
+      continue;
+    }
     const aPath = shape ? fill(A) : `${fill(A)}/${key}`;
     const value = shape ? shape.value : marker;
     // RTDB returns object keys sorted, so compare canonically, not by insertion order
@@ -152,7 +157,16 @@ export async function probeRtdb(client, src, [A, B], { log }) {
 
     // 3) shared / fixed nodes: can a stranger write here?
     if (!t.ownerVar) {
-      const anPath = `${fill(A)}/${key}_anon`;
+      const node = fill(A);
+      const anPath = `${node}/${key}_anon`;
+      // Writing a child under a node that holds a plain value (settings/maintenance: true)
+      // would REPLACE that value. Only write when the node is known to be empty or an object.
+      const probe = await client.rtdbGet(node, { token: B.token, shallow: true });
+      const safe = ok(probe) && (probe.data === null || (typeof probe.data === 'object' && !Array.isArray(probe.data)));
+      if (!safe) {
+        skipped.push(`Realtime Database /${t.path}: anonymous write not tested — rlsprobe could not confirm the node is safe to add a test child to`);
+        continue;
+      }
       const an = await client.rtdbPut(anPath, marker);
       if (ok(an)) {
         if (!ok(await client.rtdbDelete(anPath))) left.push(anPath);
@@ -302,6 +316,10 @@ export async function probeStorage(client, src, [A, B], { log }) {
   let fullyTested = 0;
   if (!src.storageRules) {
     if (client.cfg.storageBucket) skipped.push('Storage: no storage.rules found in --source, so no paths could be tested');
+    return { findings, passed, skipped, left, fullyTested, count: 0 };
+  }
+  if (!client.ep.storage) {
+    skipped.push('Storage: storage.rules found, but the app config has no storageBucket — pass a config with one to test Storage');
     return { findings, passed, skipped, left, fullyTested, count: 0 };
   }
   const targets = storageTargets(src.storageRules);

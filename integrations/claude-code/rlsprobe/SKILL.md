@@ -19,7 +19,10 @@ the first run, ask the user:
 - Supabase: "Is 'Confirm email' enabled?" If it is, ask them to create two test users in the
   dashboard and pass them with `--user-a` and `--user-b`.
 
-Only pass `--yes` after the user has confirmed.
+Only pass `--yes` after the user has confirmed. rlsprobe prints a `Target:` line naming the exact
+Supabase URL or Firebase project; show it to the user. If rlsprobe stops because several projects
+are configured (for example `.env` and `.env.local`, or dev and prod), **ask the user which one to
+test** and pass `--url` / `--project-id`. Never pick production yourself.
 
 ## 2. Run it
 

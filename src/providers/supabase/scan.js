@@ -32,33 +32,29 @@ export async function detect(opts, { site }) {
   return false;
 }
 
-export async function scan(opts, { site, log }) {
-  const t0 = Date.now();
+// Which Supabase project will be touched — shared by describe() (shown before asking for
+// consent) and scan(), so what the user approves is exactly what gets tested.
+async function resolveTarget(opts, site) {
   const findings = [];
-  const passed = [];
   const notes = [];
   let { url, anonKey } = opts;
-
-  // 1. config from the live site (already fetched by core)
   if (site) {
-    log(`→ Looking for Supabase config in ${site.url}`);
     const d = extract(site.sources);
     findings.push(...d.findings);
     url ||= d.urls[0];
     anonKey ||= d.anonKeys[0];
-    if (d.urls.length > 1) notes.push(`Multiple Supabase URLs found, using ${url}: ${d.urls.join(', ')}`);
+    if (d.urls.length > 1) notes.push(`Multiple Supabase URLs found in the site, using ${url}: ${d.urls.join(', ')}`);
   }
-  // 1b. config from the project folder (.env, local.properties, client code)
   if (opts.source) {
     const pc = await projectConfig(opts.source);
     findings.push(...pc.findings);
     notes.push(...pc.notes);
-    if (!url && pc.urls[0]) {
-      url = pc.urls[0];
-      log(`  found Supabase URL in the project: ${url}`);
+    if (!url && pc.urls.length > 1) {
+      // e.g. .env (production) and .env.local (local): never guess which one to write test users to
+      throw new Error(`Several Supabase projects are configured in this folder: ${pc.urls.join(', ')}\n  Pass --url to choose which one to test.`);
     }
-    if (!anonKey && pc.anonKeys[0]) anonKey = pc.anonKeys[0];
-    if (pc.urls.length > 1 && !opts.url) notes.push(`Several Supabase URLs in the project, using ${url} (pass --url to choose): ${pc.urls.join(', ')}`);
+    url ||= pc.urls[0];
+    anonKey ||= pc.anonKeys[0];
   }
   if (!url || !anonKey) {
     throw new Error('Supabase URL / anon key not found. Pass them with --url and --anon-key (the public anon key, never the service_role key).');
@@ -67,6 +63,20 @@ export async function scan(opts, { site, log }) {
   if (payload?.role === 'service_role' || anonKey.startsWith('sb_secret_')) {
     throw new Error('That is a service_role / secret key. Pass the public anon key — the tool must see what an attacker sees.');
   }
+  return { url: url.replace(/\/+$/, ''), anonKey, findings, notes };
+}
+
+export async function describe(opts, { site }) {
+  const { url } = await resolveTarget(opts, site);
+  return `Supabase project ${url}`;
+}
+
+export async function scan(opts, { site, log }) {
+  const t0 = Date.now();
+  const passed = [];
+  const { url, anonKey, findings, notes } = await resolveTarget(opts, site);
+  if (site) log(`→ Supabase config from ${site.url}`);
+  if (!opts.url && opts.source) log(`  Supabase project: ${url}`);
 
   const client = new SupabaseClient({ url, anonKey });
 

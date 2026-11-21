@@ -4,7 +4,7 @@ import { writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { scan } from '../src/core/scan.js';
+import { scan, plan } from '../src/core/scan.js';
 import { printReport, markdownReport, grade, color } from '../src/core/report.js';
 
 const HELP = `
@@ -132,13 +132,47 @@ function looksLikeProject(dir) {
   ].some((f) => existsSync(join(dir, f)));
 }
 
+const opts = {
+  site: v.site,
+  url: v.url,
+  anonKey: v['anon-key'],
+  userA: v['user-a'],
+  userB: v['user-b'],
+  emailDomain: v['email-domain'],
+  cleanupRpc: v['cleanup-rpc'],
+  source: v.source,
+  platform: v.platform,
+  projectId: v['project-id'],
+  apiKey: v['api-key'],
+  emulator: v.emulator,
+  databaseRules: v['database-rules'],
+  firestoreRules: v['firestore-rules'],
+  storageRules: v['storage-rules'],
+  tables: v.table,
+  only: v.only,
+  buckets: v.bucket,
+  quiet: v.quiet || v.json,
+};
+
+// Resolve exactly which backend projects would be touched BEFORE asking — the user (or an agent
+// running with --yes) approves the real targets, not just a folder name.
+let prepared;
+try {
+  prepared = await plan(opts, { log: opts.quiet ? () => {} : (m) => console.error(m) });
+} catch (e) {
+  console.error(color.red(`\nError: ${e.message}`));
+  process.exit(2);
+}
+const targets = prepared.targets.map((t) => t.target);
+console.error(`Target: ${targets.join(' + ')}`);
+
 if (!v.yes) {
   console.error(color.yellow('rlsprobe creates two test users and test rows/files in the target project, then removes the test data.'));
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   // closed stdin (CI without --yes) must abort, not hang
   const a = await new Promise((resolve) => {
     rl.once('close', () => resolve(''));
-    rl.question(`Do you own (or have permission to test) ${target}? [y/N] `).then(resolve, () => resolve(''));
+    rl.question(`Do you own (or have permission to test) ${targets.join(' and ')}? [y/N] `).then(resolve, () => resolve(''));
   });
   rl.close();
   if (!/^y(es)?$/i.test(a.trim())) {
@@ -148,27 +182,7 @@ if (!v.yes) {
 }
 
 try {
-  const result = await scan({
-    site: v.site,
-    url: v.url,
-    anonKey: v['anon-key'],
-    userA: v['user-a'],
-    userB: v['user-b'],
-    emailDomain: v['email-domain'],
-    cleanupRpc: v['cleanup-rpc'],
-    source: v.source,
-    platform: v.platform,
-    projectId: v['project-id'],
-    apiKey: v['api-key'],
-    emulator: v.emulator,
-    databaseRules: v['database-rules'],
-    firestoreRules: v['firestore-rules'],
-    storageRules: v['storage-rules'],
-    tables: v.table,
-    only: v.only,
-    buckets: v.bucket,
-    quiet: v.quiet || v.json,
-  });
+  const result = await scan(opts, prepared);
   if (v.json) console.log(JSON.stringify({ grade: grade(result.findings, result.stats), ...result }, null, 2));
   else printReport(result, { wroteFile: Boolean(v.out) });
   if (v.out) {

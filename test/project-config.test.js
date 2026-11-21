@@ -76,4 +76,25 @@ test('`npx rlsprobe` with no arguments in a project folder runs a full scan', as
   assert.ok(j.findings.some((f) => f.id === 'cross-user-read'));
   assert.ok(j.findings.some((f) => f.id === 'leaked-service-role-env'));
   assert.match(r.err, /testing the project in this folder/);
+  assert.ok(r.err.includes(`Target: Supabase project ${base}`), 'the real backend is named before anything is written');
+});
+
+test('two different Supabase projects in one folder (.env vs .env.local): refuse to guess', async () => {
+  const d = await mkdtemp(join(tmpdir(), 'rlsprobe-two-'));
+  try {
+    await writeFile(join(d, 'package.json'), '{}');
+    await writeFile(join(d, '.env'), `SUPABASE_URL=https://aaaaaaaaaaaaaaaaaaaa.supabase.co\nSUPABASE_ANON_KEY=${ANON_KEY}\n`);
+    await writeFile(join(d, '.env.local'), `SUPABASE_URL=http://localhost:54321\nSUPABASE_ANON_KEY=${ANON_KEY}\n`);
+    const r = await new Promise((resolve) => {
+      const p = spawn(process.execPath, [BIN, '--yes'], { cwd: d, env: { ...process.env, NO_COLOR: '1' } });
+      let err = '';
+      p.stderr.on('data', (x) => (err += x));
+      p.on('close', (code) => resolve({ code, err }));
+    });
+    assert.equal(r.code, 2);
+    assert.match(r.err, /Several Supabase projects are configured in this folder/);
+    assert.doesNotMatch(r.err, /Signing in two test users/, 'nothing was written');
+  } finally {
+    await rm(d, { recursive: true, force: true });
+  }
 });

@@ -4,16 +4,43 @@
 import { fetchSite, genericSecrets } from './site.js';
 import { providers, byId } from '../providers/index.js';
 
-export async function scan(opts) {
-  const log = opts.quiet ? () => {} : (m) => console.error(m);
-  const t0 = Date.now();
-
+// Work out WHAT will be tested before anything is written: which backends, and exactly which
+// project / URL each one would touch. The CLI shows this in the "do you own it?" question.
+export async function plan(opts, { log = () => {} } = {}) {
   let site = null;
   if (opts.site) {
     log(`→ Fetching ${opts.site}`);
     site = await fetchSite(opts.site, { log });
   }
+  const chosen = await choose(opts, site);
+  const targets = [];
+  for (const p of chosen) targets.push({ provider: p, target: p.describe ? await p.describe(opts, { site }) : p.label });
+  return { site, chosen, targets };
+}
 
+export async function scan(opts, prepared) {
+  const log = opts.quiet ? () => {} : (m) => console.error(m);
+  const t0 = Date.now();
+  const { site, chosen } = prepared || (await plan(opts, { log }));
+
+  const results = [];
+  const failures = [];
+  for (const p of chosen) {
+    try {
+      results.push({ provider: p, result: await p.scan(opts, { site, log }) });
+    } catch (e) {
+      // one backend failing must not throw away another backend's results — and its full
+      // message is kept (it may list test users that still need deleting)
+      if (chosen.length === 1) throw e;
+      failures.push(`[${p.label}] not tested: ${e.message.replace(/\n\s*/g, ' ')}`);
+      log(`  ${p.label} skipped: ${e.message.split('\n')[0]}`);
+    }
+  }
+  if (!results.length) throw new Error(failures.join('\n'));
+  return merge(opts, site, results, failures, t0);
+}
+
+async function choose(opts, site) {
   let chosen;
   if (opts.platform) {
     const p = byId(opts.platform);
@@ -29,21 +56,10 @@ export async function scan(opts) {
         '  Pass --platform, or the project details (e.g. --url and --anon-key for Supabase).',
     );
   }
+  return chosen;
+}
 
-  const results = [];
-  const failures = [];
-  for (const p of chosen) {
-    try {
-      results.push({ provider: p, result: await p.scan(opts, { site, log }) });
-    } catch (e) {
-      // one backend failing must not throw away another backend's results
-      if (chosen.length === 1) throw e;
-      failures.push(`[${p.label}] not tested: ${e.message.split('\n')[0]}`);
-      log(`  ${p.label} skipped: ${e.message.split('\n')[0]}`);
-    }
-  }
-  if (!results.length) throw new Error(failures.join('\n'));
-
+function merge(opts, site, results, failures, t0) {
   const findings = [];
   const passed = [];
   const notes = [];
