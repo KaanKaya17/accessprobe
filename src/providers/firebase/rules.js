@@ -1,4 +1,4 @@
-// A small parser for firestore.rules / storage.rules — only what rlsprobe needs:
+// A small parser for firestore.rules / storage.rules — only what accessprobe needs:
 // which paths exist, which allow-conditions apply, and how ownership is expressed.
 // It never decides that something is safe; that is what the live tests are for.
 

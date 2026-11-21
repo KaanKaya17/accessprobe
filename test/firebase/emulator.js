@@ -1,6 +1,6 @@
 // Test-only helper: starts the Firebase emulators (auth, firestore, database,
-// storage) for the fake `demo-rlsprobe` project via a PINNED firebase-tools
-// version run through npx. rlsprobe itself never depends on firebase-tools.
+// storage) for the fake `demo-accessprobe` project via a PINNED firebase-tools
+// version run through npx. accessprobe itself never depends on firebase-tools.
 //
 //   import { available, startEmulators } from './firebase/emulator.js';
 //   if (!available()) skip();
@@ -19,7 +19,7 @@ import path from 'node:path';
 import net from 'node:net';
 
 export const FIREBASE_TOOLS_VERSION = '15.35.0';
-export const PROJECT_ID = 'demo-rlsprobe';
+export const PROJECT_ID = 'demo-accessprobe';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const CONFIG_PATH = path.join(here, 'firebase.json');
@@ -55,7 +55,7 @@ function hasCommand(cmd, args) {
  */
 export function available() {
   if (lastStartFailed) return false;
-  if (process.env.RLSPROBE_SKIP_FIREBASE === '1') return false;
+  if (process.env.ACCESSPROBE_SKIP_FIREBASE === '1') return false;
   return hasCommand('java', ['-version']) && hasCommand('npx', ['--version']);
 }
 

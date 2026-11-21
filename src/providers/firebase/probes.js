@@ -52,7 +52,7 @@ export async function setupUsers(client, { userA, userB, emailDomain = 'example.
         r = await client.signIn(email, cred.slice(i + 1));
         if (!ok(r)) throw new Error(`Sign-in of user ${label} failed (${r.status}): ${msg(r.data)}`);
       } else {
-        email = `rlsprobe-${run}-${label.toLowerCase()}@${emailDomain}`;
+        email = `accessprobe-${run}-${label.toLowerCase()}@${emailDomain}`;
         r = await client.signUp(email, `Rp-${randomUUID()}`);
         if (!ok(r) && /OPERATION_NOT_ALLOWED|ADMIN_ONLY_OPERATION/.test(msg(r.data))) {
           // email sign-up disabled: anonymous accounts still pass "request.auth != null"
@@ -103,7 +103,7 @@ export function firestoreTargets(src) {
 
 // "users/{uid}/private" for user A -> "users/<A.uid>/private"
 function fillPath(t, user) {
-  return t.collectionPath.replace(/\{(\w+)\}/g, (_, v) => (v === t.ownerPathVar ? user.id : `rlsprobe-${v}`));
+  return t.collectionPath.replace(/\{(\w+)\}/g, (_, v) => (v === t.ownerPathVar ? user.id : `accessprobe-${v}`));
 }
 
 export async function probeFirestore(client, src, [A, B], { log }) {
@@ -147,9 +147,9 @@ export async function probeFirestore(client, src, [A, B], { log }) {
     const owned = Boolean(t.ownerField || t.ownerPathVar);
 
     // A creates a document. Try the known owner field first, then common names.
-    const marker = `rlsprobe-${rand()}`;
+    const marker = `accessprobe-${rand()}`;
     // match /profiles/{uid}: the document id itself is the owner's uid
-    const docId = t.ownerPathVar && t.ownerPathVar === t.docVar ? A.id : `rlsprobe-${rand()}`;
+    const docId = t.ownerPathVar && t.ownerPathVar === t.docVar ? A.id : `accessprobe-${rand()}`;
     let mine = null;
     let lastErr = null;
     for (const cand of payloadCandidates(t, A, marker)) {
@@ -204,7 +204,7 @@ export async function probeFirestore(client, src, [A, B], { log }) {
         title: ownedNow ? `User B can read user A's documents in "${t.collectionPath}"` : `Documents in "${t.collectionPath}" are readable by every signed-in user`,
         detail: ownedNow
           ? `Proven: A created a document (owner: ${ownerDesc}), B fetched it. Typical cause: "allow read: if request.auth != null".`
-          : 'A document created by A is visible to B, and rlsprobe found no owner field — fine only if this data is meant to be shared.',
+          : 'A document created by A is visible to B, and accessprobe found no owner field — fine only if this data is meant to be shared.',
         evidence: `as user B: ${bGet.evidence}`,
         fix: { code: rules() },
       });
@@ -278,7 +278,7 @@ export async function probeFirestore(client, src, [A, B], { log }) {
     }
 
     // B forges a document in A's name — identical payload to A's accepted one
-    const forgeId = `rlsprobe-${rand()}`;
+    const forgeId = `accessprobe-${rand()}`;
     const forged = { ...mine.payload, ...(mine.markerField ? { [mine.markerField]: `${marker}-fake` } : {}) };
     const bNew = await client.createDoc(aColl, forgeId, forged, { token: B.token });
     if (ok(bNew)) {
@@ -296,7 +296,7 @@ export async function probeFirestore(client, src, [A, B], { log }) {
     else skipped.push(`${t.collectionPath}: forged-create test inconclusive (${bNew.status} ${msg(bNew.data)})`);
 
     // anonymous visitor creates (and deletes) a document
-    const anId = `rlsprobe-${rand()}`;
+    const anId = `accessprobe-${rand()}`;
     const anNew = await client.createDoc(aColl, anId, { ...forged, ...(mine.markerField ? { [mine.markerField]: `${marker}-anon` } : {}) });
     if (ok(anNew)) {
       const anDel = await client.deleteDoc(`${aColl}/${anId}`);
@@ -388,13 +388,13 @@ export function payloadCandidates(t, A, marker) {
       } else data[k] = SAMPLE[type];
     }
     if (!schema.only && !markerField) {
-      data.rlsprobe = marker;
-      markerField = 'rlsprobe';
+      data.accessprobe = marker;
+      markerField = 'accessprobe';
     }
     out.push({ data, ownerField: of, markerField });
   }
   for (const of of owners) {
-    out.push({ data: of ? { [of]: A.id, rlsprobe: marker } : { rlsprobe: marker }, ownerField: of, markerField: 'rlsprobe' });
+    out.push({ data: of ? { [of]: A.id, accessprobe: marker } : { accessprobe: marker }, ownerField: of, markerField: 'accessprobe' });
     if (of) out.push({ data: { [of]: A.id }, ownerField: of, markerField: null });
   }
   return out;

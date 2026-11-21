@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { findProjectConfig } from '../src/providers/supabase/project-config.js';
 import { createServer, ANON_KEY, SERVICE_KEY } from './mock-supabase.js';
 
-const BIN = fileURLToPath(new URL('../bin/rlsprobe.js', import.meta.url));
+const BIN = fileURLToPath(new URL('../bin/accessprobe.js', import.meta.url));
 let dir;
 let server;
 let base;
@@ -17,7 +17,7 @@ before(async () => {
   server = createServer();
   await new Promise((r) => server.listen(0, r));
   base = `http://localhost:${server.address().port}`;
-  dir = await mkdtemp(join(tmpdir(), 'rlsprobe-proj-'));
+  dir = await mkdtemp(join(tmpdir(), 'accessprobe-proj-'));
   await writeFile(join(dir, 'package.json'), '{"name":"my-app","dependencies":{"@supabase/supabase-js":"2"}}');
   await writeFile(
     join(dir, '.env.local'),
@@ -49,7 +49,7 @@ test('finds URL + anon key in .env files, never picks a secret key, flags public
 });
 
 test('Android local.properties (Android app style) works too', async () => {
-  const d = await mkdtemp(join(tmpdir(), 'rlsprobe-android-'));
+  const d = await mkdtemp(join(tmpdir(), 'accessprobe-android-'));
   try {
     await mkdir(join(d, 'app'));
     await writeFile(join(d, 'local.properties'), `sdk.dir=C\\:\\\\Android\nSUPABASE_URL=https://abcdefghijklmnopqrst.supabase.co\nSUPABASE_API_KEY=${ANON_KEY}\n`);
@@ -61,7 +61,7 @@ test('Android local.properties (Android app style) works too', async () => {
   }
 });
 
-test('`npx rlsprobe` with no arguments in a project folder runs a full scan', async () => {
+test('`npx accessprobe` with no arguments in a project folder runs a full scan', async () => {
   const r = await new Promise((resolve) => {
     const p = spawn(process.execPath, [BIN, '--yes', '--json'], { cwd: dir, env: { ...process.env, NO_COLOR: '1' } });
     let out = '';
@@ -80,7 +80,7 @@ test('`npx rlsprobe` with no arguments in a project folder runs a full scan', as
 });
 
 test('two different Supabase projects in one folder (.env vs .env.local): refuse to guess', async () => {
-  const d = await mkdtemp(join(tmpdir(), 'rlsprobe-two-'));
+  const d = await mkdtemp(join(tmpdir(), 'accessprobe-two-'));
   try {
     await writeFile(join(d, 'package.json'), '{}');
     await writeFile(join(d, '.env'), `SUPABASE_URL=https://aaaaaaaaaaaaaaaaaaaa.supabase.co\nSUPABASE_ANON_KEY=${ANON_KEY}\n`);

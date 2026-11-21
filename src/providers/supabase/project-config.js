@@ -1,4 +1,4 @@
-// Find the Supabase URL + PUBLIC anon key in a project folder, so `npx rlsprobe` works with no flags.
+// Find the Supabase URL + PUBLIC anon key in a project folder, so `npx accessprobe` works with no flags.
 // Looks at env files (.env, .env.local, …), local.properties (Android), app.json / app.config.*
 // (Expo) and client code. Secret keys are never used — and are reported when they sit somewhere
 // that ends up in the browser or the app bundle.
@@ -48,7 +48,7 @@ export async function findProjectConfig(dir) {
             },
           });
         } else {
-          notes.push(`${shown}: a secret Supabase key is set in ${key} — fine for server code, rlsprobe never uses it.`);
+          notes.push(`${shown}: a secret Supabase key is set in ${key} — fine for server code, accessprobe never uses it.`);
         }
       }
       // only feed non-secret values to the URL/key extractor

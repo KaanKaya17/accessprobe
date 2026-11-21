@@ -1,10 +1,10 @@
 {
-  "name": "rlsprobe",
+  "name": "accessprobe",
   "version": "0.3.0",
   "description": "Prove your Supabase RLS and Firebase Security Rules actually work: two real test users, user B tries to read, change, forge and delete user A's data. Evidence, not guesses — plus fixes and a ready-to-paste AI prompt.",
   "type": "module",
   "bin": {
-    "rlsprobe": "bin/rlsprobe.js"
+    "accessprobe": "bin/accessprobe.js"
   },
   "files": [
     "bin",
@@ -17,7 +17,7 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "demo:server": "node test/mock-supabase.js",
-    "demo": "node bin/rlsprobe.js --site http://localhost:54399 --yes"
+    "demo": "node bin/accessprobe.js --site http://localhost:54399 --yes"
   },
   "engines": {
     "node": ">=20"
@@ -36,13 +36,13 @@
     "lovable"
   ],
   "author": "Kaan Kaya (https://github.com/KaanKaya17)",
-  "homepage": "https://github.com/KaanKaya17/rlsprobe#readme",
+  "homepage": "https://github.com/KaanKaya17/accessprobe#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/KaanKaya17/rlsprobe.git"
+    "url": "git+https://github.com/KaanKaya17/accessprobe.git"
   },
   "bugs": {
-    "url": "https://github.com/KaanKaya17/rlsprobe/issues"
+    "url": "https://github.com/KaanKaya17/accessprobe/issues"
   },
   "funding": {
     "type": "github",

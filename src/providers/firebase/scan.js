@@ -85,7 +85,7 @@ export async function scan(opts, { site, log }) {
     src.collections = [...names];
   }
   if (!src.firestoreRules && !src.collections.length) {
-    notes.push('No firestore.rules and no collection names found — pass --source <project folder> so rlsprobe knows what to test.');
+    notes.push('No firestore.rules and no collection names found — pass --source <project folder> so accessprobe knows what to test.');
   }
 
   const emulator = opts.emulator ? (typeof opts.emulator === 'object' ? opts.emulator : DEFAULT_EMULATOR) : null;

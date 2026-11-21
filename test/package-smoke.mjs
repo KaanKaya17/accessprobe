@@ -1,5 +1,5 @@
 // CI smoke test of the PUBLISHED package: npm pack → install the tarball into an empty
-// folder (exactly what `npx rlsprobe` does) → run the installed binary.
+// folder (exactly what `npx accessprobe` does) → run the installed binary.
 // Usage: node test/package-smoke.mjs
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readdirSync, existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
@@ -11,7 +11,7 @@ import { createServer } from './mock-supabase.js';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const isWin = process.platform === 'win32';
 const npm = (args, cwd) => execFileSync(isWin ? 'npm.cmd' : 'npm', args, { cwd, encoding: 'utf8', shell: isWin });
-const work = mkdtempSync(join(tmpdir(), 'rlsprobe-pkg-'));
+const work = mkdtempSync(join(tmpdir(), 'accessprobe-pkg-'));
 const fail = (m) => {
   console.error(`✖ ${m}`);
   process.exit(1);
@@ -26,7 +26,7 @@ try {
   npm(['install', '--no-audit', '--no-fund', join(work, tgz)], app);
 
   const binDir = join(app, 'node_modules', '.bin');
-  const bin = join(binDir, isWin ? 'rlsprobe.cmd' : 'rlsprobe');
+  const bin = join(binDir, isWin ? 'accessprobe.cmd' : 'accessprobe');
   if (!existsSync(bin)) fail(`binary not installed at ${bin} (found: ${readdirSync(binDir).join(', ')})`);
   const run = (args, opts = {}) =>
     new Promise((resolve) => {
@@ -44,7 +44,7 @@ try {
   console.log(`✔ --version ${pkg.version}`);
 
   const sa = await run(['setup-agent']);
-  if (sa.code !== 0 || !existsSync(join(app, '.claude', 'skills', 'rlsprobe', 'SKILL.md')) || !existsSync(join(app, 'AGENTS.md')))
+  if (sa.code !== 0 || !existsSync(join(app, '.claude', 'skills', 'accessprobe', 'SKILL.md')) || !existsSync(join(app, 'AGENTS.md')))
     fail(`setup-agent failed: ${sa.err || sa.out}`);
   console.log('✔ setup-agent installed the skill and AGENTS.md');
 

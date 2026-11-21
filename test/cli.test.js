@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer, ANON_KEY } from './mock-supabase.js';
 import { grade } from '../src/core/report.js';
 
-const BIN = fileURLToPath(new URL('../bin/rlsprobe.js', import.meta.url));
+const BIN = fileURLToPath(new URL('../bin/accessprobe.js', import.meta.url));
 let server;
 let base;
 

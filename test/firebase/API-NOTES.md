@@ -14,13 +14,13 @@ Production behaviour not tested here is marked **(unverified)**.
 | Service | Emulator base URL | Production equivalent |
 |---|---|---|
 | Auth | `http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/...?key=any` | `https://identitytoolkit.googleapis.com/v1/...?key=<apiKey>` |
-| Firestore | `http://127.0.0.1:8080/v1/projects/demo-rlsprobe/databases/(default)/documents` | `https://firestore.googleapis.com/v1/projects/<id>/databases/(default)/documents` |
-| RTDB | `http://127.0.0.1:9000/<path>.json?ns=demo-rlsprobe-default-rtdb` | `https://<ns>.firebaseio.com/<path>.json` or `https://<ns>.<region>.firebasedatabase.app/<path>.json` (the namespace comes from the host, with no `ns=`) |
-| Storage | `http://127.0.0.1:9199/v0/b/demo-rlsprobe.appspot.com/o` | `https://firebasestorage.googleapis.com/v0/b/<bucket>/o` |
+| Firestore | `http://127.0.0.1:8080/v1/projects/demo-accessprobe/databases/(default)/documents` | `https://firestore.googleapis.com/v1/projects/<id>/databases/(default)/documents` |
+| RTDB | `http://127.0.0.1:9000/<path>.json?ns=demo-accessprobe-default-rtdb` | `https://<ns>.firebaseio.com/<path>.json` or `https://<ns>.<region>.firebasedatabase.app/<path>.json` (the namespace comes from the host, with no `ns=`) |
+| Storage | `http://127.0.0.1:9199/v0/b/demo-accessprobe.appspot.com/o` | `https://firebasestorage.googleapis.com/v0/b/<bucket>/o` |
 
-* The emulator's default bucket is **`demo-rlsprobe.appspot.com`**, and its upload responses echo that bucket name. The
+* The emulator's default bucket is **`demo-accessprobe.appspot.com`**, and its upload responses echo that bucket name. The
   Storage emulator auto-creates **any** bucket name on first upload (`some-other-bucket` worked). It treats
-  `demo-rlsprobe.firebasestorage.app` as a separate, empty bucket. Projects created after Oct 2024 default to
+  `demo-accessprobe.firebasestorage.app` as a separate, empty bucket. Projects created after Oct 2024 default to
   `<id>.firebasestorage.app` in production **(unverified here)**, so take the bucket from the app's config.
 * `?key=` is required by the Auth emulator (it returns 403 `"The request is missing a valid API key."` without it), but
   the emulator accepts any value.
@@ -39,7 +39,7 @@ All requests are `POST` with a JSON body. Errors look like `{"error":{"code":400
 | `accounts:delete` | `{idToken}` (the user's **own** token, no admin needed) | 200 `{"kind":"identitytoolkit#DeleteAccountResponse"}`; a second call gives 400 `USER_NOT_FOUND`; a garbage token gives 400 `INVALID_ID_TOKEN`. This works for both email and anonymous users. |
 
 * Emulator ID tokens are **unsigned** (`{"alg":"none","typ":"JWT"}`). The claims are `sub`/`user_id` = uid,
-  `aud` = project id, `iss` = `https://securetoken.google.com/demo-rlsprobe`, `firebase.sign_in_provider`, and 1 h expiry.
+  `aud` = project id, `iss` = `https://securetoken.google.com/demo-accessprobe`, `firebase.sign_in_provider`, and 1 h expiry.
 * Production differences **(unverified)**: email-enumeration protection (the default on newer projects) collapses the
   sign-in errors into `INVALID_LOGIN_CREDENTIALS`. Email/password and anonymous sign-in must be enabled in the console,
   otherwise you get `OPERATION_NOT_ALLOWED` / `ADMIN_ONLY_OPERATION`. `accounts:delete` can return

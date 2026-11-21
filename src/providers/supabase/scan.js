@@ -118,7 +118,7 @@ export async function scan(opts, { site, log }) {
 
     const hint = schema.rpcs.find((r) => CLEANUP_RPC_HINT.test(r));
     if (!opts.cleanupRpc && hint && users.some((u) => u.created)) {
-      notes.push(`Tip: your API has "${hint}" — pass --cleanup-rpc ${hint} and rlsprobe will delete its test users with it.`);
+      notes.push(`Tip: your API has "${hint}" — pass --cleanup-rpc ${hint} and accessprobe will delete its test users with it.`);
     }
 
     return {
@@ -171,7 +171,7 @@ async function loadSchema(client, token, notes, sourceDir, log) {
     const r = await client.openapi({ token: tok });
     if (!r.ok) {
       if (who === 'user' && r.status === 401 && !sourceDir)
-        notes.push('This project only serves its API schema to the service_role key (new Supabase default). Pass --source <your project folder> so rlsprobe can read tables from your migrations and code.');
+        notes.push('This project only serves its API schema to the service_role key (new Supabase default). Pass --source <your project folder> so accessprobe can read tables from your migrations and code.');
       continue;
     }
     anyOk = true;

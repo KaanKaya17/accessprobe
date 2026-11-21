@@ -8,14 +8,14 @@ import { scan, plan } from '../src/core/scan.js';
 import { printReport, markdownReport, grade, color } from '../src/core/report.js';
 
 const HELP = `
-rlsprobe — prove your backend's access rules actually work (Supabase, Firebase)
+accessprobe — prove your backend's access rules actually work (Supabase, Firebase)
 
 Usage
-  npx rlsprobe                  test the project in this folder (finds the config itself)
-  npx rlsprobe setup-agent      teach Claude Code / Codex / Cursor in this project to use rlsprobe
-  npx rlsprobe --site https://your-app.com --source .
-  npx rlsprobe --url https://xyz.supabase.co --anon-key eyJ... --source .
-  npx rlsprobe --project-id my-app --api-key AIza... --source .
+  npx accessprobe                  test the project in this folder (finds the config itself)
+  npx accessprobe setup-agent      teach Claude Code / Codex / Cursor in this project to use accessprobe
+  npx accessprobe --site https://your-app.com --source .
+  npx accessprobe --url https://xyz.supabase.co --anon-key eyJ... --source .
+  npx accessprobe --project-id my-app --api-key AIza... --source .
 
 Options
   --site <url>           Your deployed app. Finds the backend config in its JS
@@ -93,17 +93,17 @@ let positionals = [];
 try {
   ({ values: v, positionals } = parseArgs({ options: { ...OPTIONS, force: { type: 'boolean' } }, allowPositionals: true }));
 } catch (e) {
-  console.error(`${e.message}\nRun rlsprobe --help for usage.`);
+  console.error(`${e.message}\nRun accessprobe --help for usage.`);
   process.exit(2);
 }
 
 if (positionals[0] === 'setup-agent') {
   const { setupAgent } = await import('../src/core/setup-agent.js');
   for (const line of await setupAgent(process.cwd(), { force: v.force })) console.log(`  ✔ ${line}`);
-  console.log('\nYour coding agent can now run rlsprobe. Try asking it: "check my database rules with rlsprobe".');
+  console.log('\nYour coding agent can now run accessprobe. Try asking it: "check my database rules with accessprobe".');
   process.exit(0);
 } else if (positionals.length) {
-  console.error(`Unknown command "${positionals[0]}". Run rlsprobe --help for usage.`);
+  console.error(`Unknown command "${positionals[0]}". Run accessprobe --help for usage.`);
   process.exit(2);
 }
 
@@ -113,7 +113,7 @@ if (v.version) {
   process.exit(0);
 }
 
-// `npx rlsprobe` inside a project folder: test that project
+// `npx accessprobe` inside a project folder: test that project
 if (!v.help && !v.site && !v.url && !v['project-id'] && !v.source && looksLikeProject(process.cwd())) {
   v.source = '.';
   console.error(color.dim(`No target given — testing the project in this folder (${process.cwd()}).`));
@@ -167,7 +167,7 @@ const targets = prepared.targets.map((t) => t.target);
 console.error(`Target: ${targets.join(' + ')}`);
 
 if (!v.yes) {
-  console.error(color.yellow('rlsprobe creates two test users and test rows/files in the target project, then removes the test data.'));
+  console.error(color.yellow('accessprobe creates two test users and test rows/files in the target project, then removes the test data.'));
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   // closed stdin (CI without --yes) must abort, not hang
   const a = await new Promise((resolve) => {

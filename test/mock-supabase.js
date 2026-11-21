@@ -151,13 +151,13 @@ function makeState() {
         updateTriggerError: true,
         rows: [],
       },
-      // correct policies + varchar(16): a longer tampered marker must not fake a PASS
+      // correct policies + varchar(18), exactly the marker length: a longer tampered marker must not fake a PASS
       short_codes: {
-        columns: { id: ['bigint', { pk: true, default: true }], user_id: ['uuid', { required: true }], code: ['character varying', { maxLen: 16 }] },
+        columns: { id: ['bigint', { pk: true, default: true }], user_id: ['uuid', { required: true }], code: ['character varying', { maxLen: 18 }] },
         rls: { select: (c, r) => own(c, r), insert: (c, r) => own(c, r), update: (c, r) => own(c, r), delete: (c, r) => own(c, r) },
         rows: [],
       },
-      // no primary key and no text column: rlsprobe must not guess a filter
+      // no primary key and no text column: accessprobe must not guess a filter
       counters: {
         columns: { user_id: ['uuid', { required: true }], value: ['integer'] },
         rls: {

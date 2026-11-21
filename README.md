@@ -1,6 +1,6 @@
-# rlsprobe
+# accessprobe
 
-[![CI](https://github.com/KaanKaya17/rlsprobe/actions/workflows/ci.yml/badge.svg)](https://github.com/KaanKaya17/rlsprobe/actions/workflows/ci.yml)
+[![CI](https://github.com/KaanKaya17/accessprobe/actions/workflows/ci.yml/badge.svg)](https://github.com/KaanKaya17/accessprobe/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Node 20+](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
 ![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
@@ -12,15 +12,15 @@ Most scanners check whether a policy *exists*. A policy like `using (auth.role()
 (Supabase) or `allow read: if request.auth != null` (Firebase) exists and passes every checklist,
 yet it lets every logged-in user read everyone else's data.
 
-rlsprobe doesn't guess. It signs up **two real test users** in your app, has user A create rows and
+accessprobe doesn't guess. It signs up **two real test users** in your app, has user A create rows and
 files, then checks whether user B (or an anonymous visitor) can **read, change or delete** them.
 
 ```bash
 cd your-app
-npx rlsprobe
+npx accessprobe
 ```
 
-That's it. rlsprobe finds your Supabase or Firebase config in `.env`, `local.properties`,
+That's it. accessprobe finds your Supabase or Firebase config in `.env`, `local.properties`,
 `google-services.json` or your code, using only the public key an attacker would also see. Then it
 reads your migrations or rules and runs the tests. Add `--site https://your-app.com` to also check
 the deployed JavaScript bundle for leaked secret keys.
@@ -47,12 +47,12 @@ the deployed JavaScript bundle for leaked secret keys.
 Run this once in your project:
 
 ```bash
-npx rlsprobe setup-agent
+npx accessprobe setup-agent
 ```
 
-It adds a Claude Code skill (`.claude/skills/rlsprobe/SKILL.md`) and a short section to `AGENTS.md`,
+It adds a Claude Code skill (`.claude/skills/accessprobe/SKILL.md`) and a short section to `AGENTS.md`,
 which Codex, Cursor and other agents read. Then just ask your agent: *"check my database rules with
-rlsprobe"*.
+accessprobe"*.
 
 The skill tells the agent to:
 
@@ -94,21 +94,21 @@ you pass `--cleanup-rpc`.
 
 ```bash
 # recommended: deployed site + your project folder
-npx rlsprobe --site https://your-app.com --source . --out report.md
+npx accessprobe --site https://your-app.com --source . --out report.md
 
 # mobile app / no website: point it at the project directly
-npx rlsprobe --url https://xyz.supabase.co --anon-key eyJ... --source .
+npx accessprobe --url https://xyz.supabase.co --anon-key eyJ... --source .
 
-# "Confirm email" enabled? rlsprobe notices and stops BEFORE signing anyone up (bouncing
+# "Confirm email" enabled? accessprobe notices and stops BEFORE signing anyone up (bouncing
 # confirmation emails can get a project's email sending restricted). Create two users in the
 # dashboard with "Auto Confirm User" and pass them. If your API has a "delete my account"
-# function, rlsprobe can remove them afterwards.
-npx rlsprobe --url ... --anon-key ... --source . \
+# function, accessprobe can remove them afterwards.
+npx accessprobe --url ... --anon-key ... --source . \
   --user-a a@test.dev:pass1 --user-b b@test.dev:pass2 --cleanup-rpc delete_my_account
 ```
 
 **Why `--source`?** New Supabase projects only show the API schema (`/rest/v1/`) to the
-`service_role` key, so an outside tool can't list your tables. rlsprobe reads them from
+`service_role` key, so an outside tool can't list your tables. accessprobe reads them from
 `supabase/migrations/*.sql` (columns, types, keys, `NOT NULL`, foreign keys) and from your app code
 (`.from("table")`, `rest/v1/table`, `.rpc("fn")`). Your code stays on your machine.
 
@@ -119,29 +119,29 @@ that table's id instead of `auth.uid()`. Fix SQL is generated with that mapping 
 
 ```bash
 # web app: config comes from the bundle, rules and collection names from your project
-npx rlsprobe --site https://your-app.web.app --source .
+npx accessprobe --site https://your-app.web.app --source .
 
 # Android / iOS: config from google-services.json / GoogleService-Info.plist
-npx rlsprobe --source .
+npx accessprobe --source .
 
 # rules only live in the console? export them first (read-only, needs `firebase login`)
 firebase database:get /.settings/rules --project my-app > database.rules.json
-npx rlsprobe --source . --database-rules database.rules.json
+npx accessprobe --source . --database-rules database.rules.json
 
 # against the local Emulator Suite (firebase emulators:start)
-npx rlsprobe --project-id demo-my-app --api-key any --source . --emulator
+npx accessprobe --project-id demo-my-app --api-key any --source . --emulator
 ```
 
-Email/password sign-up must be enabled. If it isn't, rlsprobe falls back to anonymous accounts, which
+Email/password sign-up must be enabled. If it isn't, accessprobe falls back to anonymous accounts, which
 still pass a rule like `request.auth != null`.
 
 Without a `database.rules.json`, Realtime Database paths are taken from your code
 (`getReference("rooms").child(roomCode)` → `rooms/$roomCode`). An attacker can read the same paths
-out of your app, so this is a fair test. rlsprobe only writes test entries under its own test user's
+out of your app, so this is a fair test. accessprobe only writes test entries under its own test user's
 key, never into shared nodes.
 
 **Exit codes:** `0` ok, `1` critical issue found, `2` usage error, `3` nothing could be tested.
-rlsprobe never reports a clean grade for an app it couldn't test.
+accessprobe never reports a clean grade for an app it couldn't test.
 
 ## Tested on real apps
 
@@ -157,7 +157,7 @@ rlsprobe never reports a clean grade for an app it couldn't test.
   - One read stays open: the app itself reads other players' inboxes to count pending invites, so
     closing it needs an app update, not a rules change.
 
-Each run also turned up bugs in rlsprobe itself, all fixed and covered by tests:
+Each run also turned up bugs in accessprobe itself, all fixed and covered by tests:
 
 - the hidden API schema and id mapping;
 - CHECK constraints and `.validate` shapes;
@@ -173,13 +173,13 @@ npm run demo          # in a second terminal
 
 ## Rules
 
-**Only test apps you own or are authorized to test.** rlsprobe creates users and data in the target
+**Only test apps you own or are authorized to test.** accessprobe creates users and data in the target
 project. It asks you to confirm ownership before every run unless you pass `--yes`.
 
 ## Roadmap
 
-- [x] Claude Code skill + `AGENTS.md` for Codex / Cursor (`rlsprobe setup-agent`)
-- [x] Zero-config runs (`npx rlsprobe` in a project folder)
+- [x] Claude Code skill + `AGENTS.md` for Codex / Cursor (`accessprobe setup-agent`)
+- [x] Zero-config runs (`npx accessprobe` in a project folder)
 - [ ] GitHub Action + turn findings into permanent pgTAP regression tests
 - [ ] MCP server: agents run it after every schema change
 - [ ] Edge Function checks (auth required? cross-user IDs?)
@@ -188,14 +188,14 @@ project. It asks you to confirm ownership before every run unless you pass `--ye
 
 ## Contributing
 
-Bug reports are very welcome, especially **wrong results**: a false alarm, or a leak that rlsprobe
+Bug reports are very welcome, especially **wrong results**: a false alarm, or a leak that accessprobe
 passed. Use the *Wrong result* issue template. If real data is exposed, report it privately through
 [Security → Report a vulnerability](SECURITY.md). See [CONTRIBUTING.md](CONTRIBUTING.md) to set up
 the tests or add a platform.
 
 ## Sponsor
 
-rlsprobe is free and MIT-licensed. If it caught something before your users did, consider
+accessprobe is free and MIT-licensed. If it caught something before your users did, consider
 [sponsoring the project](https://github.com/sponsors/KaanKaya17). Sponsorship pays for new platform
 adapters and keeps them tested against real backends.
 

@@ -7,7 +7,7 @@ import { scanSource, sourceToDefinitions } from '../src/providers/supabase/sourc
 import { parseSchema } from '../src/providers/supabase/schema.js';
 
 test('reads tables, columns, keys and RPCs from migrations + app code', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'rlsprobe-'));
+  const dir = await mkdtemp(join(tmpdir(), 'accessprobe-'));
   try {
     await mkdir(join(dir, 'supabase', 'migrations'), { recursive: true });
     await mkdir(join(dir, 'app'));

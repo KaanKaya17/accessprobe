@@ -80,7 +80,7 @@ test('composite primary key: only the test row is ever touched (other team membe
   // the mock lets anyone delete in team_members; a filter on team_id alone would wipe team 1
   const r = await fetch(`${base}/rest/v1/team_members?select=*`, { headers: { apikey: 'x', Authorization: `Bearer ${(await import('./mock-supabase.js')).SERVICE_KEY}` } });
   const rows = await r.json();
-  assert.equal(rows.filter((x) => x.team_id === 1 && x.role !== null && !String(x.role).startsWith('rlsprobe')).length, 2, JSON.stringify(rows));
+  assert.equal(rows.filter((x) => x.team_id === 1 && x.role !== null && !String(x.role).startsWith('accessprobe')).length, 2, JSON.stringify(rows));
   assert.ok(has('cross-user-delete', 'team_members'), 'the real bug is still found');
 });
 
@@ -95,7 +95,7 @@ test('an update that fails for a non-RLS reason (trigger) is inconclusive, never
   assert.ok(result.notes.some((n) => n.startsWith('audit_notes: modify test inconclusive')));
 });
 
-test('varchar(16) marker column: same-length tampering, correct policy proven', () => {
+test('varchar(18) marker column: same-length tampering, correct policy proven', () => {
   assert.ok(result.passed.includes("short_codes: B cannot modify A's rows"));
   assert.equal(result.findings.filter((f) => f.table === 'short_codes').length, 0);
 });

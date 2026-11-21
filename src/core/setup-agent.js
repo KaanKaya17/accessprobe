@@ -1,5 +1,5 @@
-// `rlsprobe setup-agent`: teach the AI coding agent in this project how to use rlsprobe safely.
-//   .claude/skills/rlsprobe/SKILL.md  (Claude Code)
+// `accessprobe setup-agent`: teach the AI coding agent in this project how to use accessprobe safely.
+//   .claude/skills/accessprobe/SKILL.md  (Claude Code)
 //   AGENTS.md section                 (Codex, Cursor, Copilot agents, … read AGENTS.md)
 // Never overwrites: an existing skill file is left alone, the AGENTS.md section is added once.
 
@@ -8,13 +8,13 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const MARK = '## Security checks (rlsprobe)';
+const MARK = '## Security checks (accessprobe)';
 const exists = (p) => access(p).then(() => true, () => false);
 
 export async function setupAgent(dir = process.cwd(), { force = false } = {}) {
   const done = [];
-  const skillSrc = join(pkgRoot, 'integrations', 'claude-code', 'rlsprobe', 'SKILL.md');
-  const skillDst = join(dir, '.claude', 'skills', 'rlsprobe', 'SKILL.md');
+  const skillSrc = join(pkgRoot, 'integrations', 'claude-code', 'accessprobe', 'SKILL.md');
+  const skillDst = join(dir, '.claude', 'skills', 'accessprobe', 'SKILL.md');
   if ((await exists(skillDst)) && !force) {
     done.push(`kept existing ${rel(dir, skillDst)} (use --force to replace)`);
   } else {
@@ -27,10 +27,10 @@ export async function setupAgent(dir = process.cwd(), { force = false } = {}) {
   const agents = join(dir, 'AGENTS.md');
   const current = (await exists(agents)) ? await readFile(agents, 'utf8') : null;
   if (current?.includes(MARK)) {
-    done.push('AGENTS.md already has the rlsprobe section');
+    done.push('AGENTS.md already has the accessprobe section');
   } else {
     await writeFile(agents, current ? `${current.replace(/\s*$/, '')}\n\n${snippet}` : `# Agent notes\n\n${snippet}`);
-    done.push(`${current ? 'added the rlsprobe section to' : 'created'} AGENTS.md  (Codex, Cursor and other agents)`);
+    done.push(`${current ? 'added the accessprobe section to' : 'created'} AGENTS.md  (Codex, Cursor and other agents)`);
   }
   return done;
 }

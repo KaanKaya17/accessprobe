@@ -1,4 +1,4 @@
 {
-  "project_info": { "project_id": "demo-rlsprobe", "firebase_url": "https://not-the-real-instance.firebaseio.com", "storage_bucket": "demo-rlsprobe.appspot.com" },
+  "project_info": { "project_id": "demo-accessprobe", "firebase_url": "https://not-the-real-instance.firebaseio.com", "storage_bucket": "demo-accessprobe.appspot.com" },
   "client": [{ "api_key": [{ "current_key": "AIzaSyFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE00" }] }]
 }
