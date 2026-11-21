@@ -11,6 +11,23 @@
     "open": {
       ".read": true,
       ".write": true
+    },
+    "scores": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && auth.uid == $uid",
+        ".validate": "newData.hasChildren(['score', 'nickname']) && newData.child('score').isNumber()"
+      }
+    },
+    "invites": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "backups": {
+      ".read": "auth != null",
+      "$code": {
+        ".write": "auth != null"
+      }
     }
   }
 }

@@ -95,12 +95,21 @@ npx rlsprobe --site https://your-app.web.app --source .
 # Android / iOS: config from google-services.json / GoogleService-Info.plist
 npx rlsprobe --source .
 
+# rules only live in the console? export them first (read-only, needs `firebase login`)
+firebase database:get /.settings/rules --project my-app > database.rules.json
+npx rlsprobe --source . --database-rules database.rules.json
+
 # against the local Emulator Suite (firebase emulators:start)
 npx rlsprobe --project-id demo-my-app --api-key any --source . --emulator
 ```
 
 Email/password sign-up must be enabled. If it isn't, rlsprobe falls back to anonymous accounts, which
 still pass a rule like `request.auth != null`.
+
+Without a `database.rules.json`, Realtime Database paths are taken from your code
+(`getReference("rooms").child(roomCode)` → `rooms/$roomCode`). An attacker can read the same paths
+out of your app, so this is a fair test. rlsprobe only writes test entries under its own test user's
+key, never into shared nodes.
 
 **Exit codes:** `0` ok, `1` critical issue found, `2` usage error, `3` nothing could be tested.
 rlsprobe never reports a clean grade for an app it couldn't test.

@@ -49,8 +49,9 @@ export async function scan(opts) {
   for (const { provider: p, result: r } of results) {
     const pre = many ? `[${p.label}] ` : '';
     findings.push(...r.findings.map((f) => ({ ...f, platform: p.id, platformLabel: p.label })));
-    passed.push(...r.passed.map((x) => pre + x));
-    notes.push(...r.notes.map((x) => pre + x));
+    // several targets can share a parent node and prove the same thing: report it once
+    for (const x of r.passed) if (!passed.includes(pre + x)) passed.push(pre + x);
+    for (const x of r.notes) if (!notes.includes(pre + x)) notes.push(pre + x);
   }
 
   const sum = (k) => results.reduce((n, { result }) => n + (result.stats?.[k] || 0), 0);

@@ -1,0 +1,4 @@
+{
+  "project_info": { "project_id": "some-other-project", "firebase_url": "https://some-other-project-default-rtdb.firebaseio.com", "storage_bucket": "some-other-project.appspot.com" },
+  "client": [{ "api_key": [{ "current_key": "AIzaSyFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE00" }] }]
+}
