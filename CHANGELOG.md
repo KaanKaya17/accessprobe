@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-21
+
+### Added
+- **Users making themselves admin (Supabase).** "Users may update their own row" usually also lets them change `role`, `is_admin`, `plan`, `credits` and similar columns on that row. User A now tries this on its own test row and puts the old value back right away. A finding includes column-grant SQL that keeps the row editable but locks these columns. A refusal (for example, a missing column grant) is recorded as a pass.
+- **Users making themselves admin (Firestore).** When rules grant rights based on the caller's own document (`get(/…/users/$(request.auth.uid)).data.role == 'admin'`), user A tries to set that field itself. The fix uses `affectedKeys().hasAny([...])` to block it.
+- **Views that skip RLS (Supabase).** A view runs with its owner's rights unless it has `security_invoker = true`, so it can show rows that the table's policy hides. B and an anonymous visitor now look through every view for A's test rows from protected tables. A finding includes the `alter view … set (security_invoker = true)` fix. Views are also found in `supabase/migrations`.
+
+### Fixed
+- An anonymous read of a view no longer suggests `create policy` SQL, which is invalid on a view. It suggests `security_invoker` instead.
+
 ## [0.3.1] - 2026-11-21
 
 ### Changed

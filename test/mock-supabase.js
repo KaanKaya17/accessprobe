@@ -9,6 +9,10 @@
 //   avatars    — bucket: anon can list, anyone can download → storage leaks
 //   documents  — bucket: owner folder only                  → should PASS
 //   site JS    — ships the service_role key                 → leaked key
+//   memberships   — "update own row" also covers plan/is_admin → self-escalation
+//   subscriptions — plan column not updatable (column grant)    → should PASS
+//   notes_feed    — view without security_invoker over notes    → view bypasses RLS
+//   my_notes      — view with security_invoker over notes       → should PASS
 
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
@@ -157,6 +161,30 @@ function makeState() {
         rls: { select: (c, r) => own(c, r), insert: (c, r) => own(c, r), update: (c, r) => own(c, r), delete: (c, r) => own(c, r) },
         rows: [],
       },
+      // BUG: users may update their own row, including plan and is_admin
+      memberships: {
+        columns: {
+          id: ['bigint', { pk: true, default: true }],
+          user_id: ['uuid', { required: true }],
+          nickname: ['text'],
+          plan: ['text', { defVal: 'free' }],
+          is_admin: ['boolean', { defVal: false }],
+        },
+        rls: { select: (c, r) => own(c, r), insert: (c, r) => own(c, r), update: (c, r) => own(c, r), delete: (c, r) => own(c, r) },
+        rows: [],
+      },
+      // correct: own-row policies, and plan is left out of the UPDATE grant
+      subscriptions: {
+        columns: {
+          id: ['bigint', { pk: true, default: true }],
+          user_id: ['uuid', { required: true }],
+          label: ['text'],
+          plan: ['text', { defVal: 'free' }],
+        },
+        rls: { select: (c, r) => own(c, r), insert: (c, r) => own(c, r), update: (c, r) => own(c, r), delete: (c, r) => own(c, r) },
+        lockedCols: ['plan'],
+        rows: [],
+      },
       // no primary key and no text column: accessprobe must not guess a filter
       counters: {
         columns: { user_id: ['uuid', { required: true }], value: ['integer'] },
@@ -168,6 +196,11 @@ function makeState() {
         },
         rows: [],
       },
+    },
+    // views: security definer (the default) skips the base table's RLS; security_invoker applies it
+    views: {
+      notes_feed: { base: 'notes', invoker: false },
+      my_notes: { base: 'notes', invoker: true },
     },
     seq: 100,
     buckets: {
@@ -214,6 +247,10 @@ function openapi(S) {
     }
     definitions[name] = { type: 'object', properties, required };
     paths[`/${name}`] = { get: {}, post: {}, patch: {}, delete: {} };
+  }
+  for (const [name, v] of Object.entries(S.views)) {
+    definitions[name] = { ...definitions[v.base] };
+    paths[`/${name}`] = { get: {} };
   }
   return { swagger: '2.0', info: { title: 'mock' }, paths, definitions };
 }
@@ -289,6 +326,14 @@ export function createServer({ autoconfirm = true } = {}) {
     if (u.pathname === '/rest/v1/' && req.method === 'GET') return send(200, openapi(S));
     const tm = u.pathname.match(/^\/rest\/v1\/([a-z_]+)$/);
     if (tm) {
+      const view = S.views[tm[1]];
+      if (view) {
+        if (req.method !== 'GET') return send(405, { code: '42809', message: 'cannot change a view' });
+        const b = S.tables[view.base];
+        const match = filters(u.searchParams);
+        const rows = b.rows.filter((r) => (!view.invoker || allow(b, 'select', ctx, r)) && match(r));
+        return send(200, rows, { 'Content-Range': `${rows.length ? `0-${rows.length - 1}` : '*'}/${rows.length}` });
+      }
       const t = S.tables[tm[1]];
       if (!t) return send(404, { code: '42P01', message: `relation "public.${tm[1]}" does not exist` });
       const match = filters(u.searchParams);
@@ -308,6 +353,7 @@ export function createServer({ autoconfirm = true } = {}) {
         for (const [col, [format, o = {}]] of Object.entries(t.columns)) {
           if (row[col] === undefined && o.default) row[col] = format === 'uuid' ? randomUUID() : ++S.seq;
           if (row[col] === undefined && o.required) return send(400, { code: '23502', message: `null value in column "${col}"` });
+          if (row[col] === undefined) row[col] = o.defVal ?? null; // PostgREST returns every column
         }
         const long = tooLong(row);
         if (long) return send(400, { code: '22001', message: `value too long for type character varying(${long[1][1].maxLen})` });
@@ -320,6 +366,8 @@ export function createServer({ autoconfirm = true } = {}) {
       }
       if (req.method === 'PATCH') {
         const patch = JSON.parse(await body(req));
+        const locked = (t.lockedCols || []).find((c) => c in patch);
+        if (locked && !ctx.bypass) return send(403, { code: '42501', message: `permission denied for table ${tm[1]}` });
         // USING (old row) decides which rows are reachable; WITH CHECK (new row) must hold afterwards
         const hit = t.rows.filter((r) => allow(t, 'select', ctx, r) && allow(t, 'update', ctx, r) && match(r));
         for (const r of hit) {

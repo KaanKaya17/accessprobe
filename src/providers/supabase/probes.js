@@ -4,7 +4,8 @@
 
 import { randomUUID } from 'node:crypto';
 import { buildRow } from './schema.js';
-import { ownerPolicies, enableRls, noOwnerColumn, storagePolicies } from './fixes.js';
+import { ownerPolicies, enableRls, noOwnerColumn, storagePolicies, viewInvoker } from './fixes.js';
+import { probeEscalation, probeViews } from './privilege.js';
 
 const rand = () => Math.random().toString(36).slice(2, 8);
 
@@ -131,6 +132,8 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
   // rows to clean up — owned by the caller, so cleanup still runs if a probe throws
   let fullyTested = 0; // tables where A created a row and B attacked it
   let readOnly = 0; // tables users can't write to at all (no INSERT grant)
+  const protectedRows = []; // A's rows that B was refused: views must not show them either
+  const viewRelations = []; // views and name-only relations, checked after all tables
 
   for (const t of schema.tables) {
     log(`  table ${t.name}`);
@@ -195,9 +198,11 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
           id: 'anon-read-owned',
           severity: 'critical',
           title: `Anyone (not logged in) can read "${t.name}" — ${anonCount} row(s)`,
-          detail: `Rows have an owner column (${t.owner.name}) so they look like private user data, but the anon key can read them.`,
+          detail:
+            `Rows have an owner column (${t.owner.name}) so they look like private user data, but the anon key can read them.` +
+            (t.isView ? ' This is a view: it skips the RLS of the tables it reads unless it has security_invoker = true.' : ''),
           evidence: `${anon.evidence} — ${anonCount} rows, columns: ${t.columns.map((c) => c.name).join(', ')}`,
-          fix: { sql: pol() },
+          fix: { sql: t.isView ? viewInvoker(t.name) : pol() },
         });
       } else {
         tf({
@@ -206,7 +211,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
           title: `"${t.name}" is publicly readable (${anonCount} row(s))`,
           detail: 'Fine for a public catalog (products, blog posts). Not fine if it holds anything personal.',
           evidence: `${anon.evidence} — columns: ${t.columns.map((c) => c.name).join(', ')}`,
-          fix: { sql: enableRls(t.name) },
+          fix: { sql: t.isView ? viewInvoker(t.name) : enableRls(t.name) },
         });
       }
     } else if (anonCount > 0 && anonWrite) {
@@ -227,11 +232,12 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
     if (anonWrite) continue;
 
     if (t.isView) {
-      skipped.push(`${t.name}: view (read-only) — only the anonymous read check applies`);
+      viewRelations.push(t);
       continue;
     }
 
     if (t.nameOnly) {
+      viewRelations.push(t);
       await freshUserCheck(client, t, B, { tf, passed, skipped, anonCount });
       skipped.push(`${t.name}: write tests skipped — columns unknown (found in code or --table, not in migrations)`);
       continue;
@@ -312,6 +318,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
       continue;
     }
     fullyTested++;
+    await probeEscalation(client, t, mine, A, { tf, passed, skipped, filterFor, policyDenied, msg });
     // PostgREST hides rows instead of erroring: 200 [] (or an explicit 401/403/42501) is a refusal
     const refusedOrHidden = (r) => policyDenied(r) || (r.ok && Array.isArray(r.data) && r.data.length === 0);
     const unchanged = async () => {
@@ -346,7 +353,10 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
         evidence: `as user B: ${bRead.evidence} → returned A's row`,
         fix: { sql: noOwnerColumn(t.name) },
       });
-    } else if (refusedOrHidden(bRead)) passed.push(`${t.name}: B cannot read A's rows`);
+    } else if (refusedOrHidden(bRead)) {
+      passed.push(`${t.name}: B cannot read A's rows`);
+      protectedRows.push(mine);
+    }
     else skipped.push(`${t.name}: read test inconclusive (${bRead.status} ${msg(bRead.data)})`);
 
     // 4b) anonymous visitor reads A's row (proves what an empty anon SELECT could not)
@@ -449,6 +459,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
     }
   }
 
+  await probeViews(client, viewRelations, protectedRows, [A, B], { findings, passed, skipped, policyDenied, msg });
   return { findings, passed, skipped, created, fullyTested, readOnly };
 }
 

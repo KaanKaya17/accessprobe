@@ -53,3 +53,25 @@ create or replace function public.internal_only() returns void language sql as $
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('views in migrations are found (by name) and marked read-only', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'accessprobe-'));
+  try {
+    await mkdir(join(dir, 'supabase', 'migrations'), { recursive: true });
+    await writeFile(
+      join(dir, 'supabase', 'migrations', '002.sql'),
+      `create table public.notes (id bigint primary key, user_id uuid not null, body text);
+create or replace view public.notes_feed as select id, body from public.notes;
+create view "safe_notes" with (security_invoker = true) as select * from notes;
+`,
+    );
+    const schema = parseSchema(sourceToDefinitions(await scanSource(dir)));
+    const by = Object.fromEntries(schema.tables.map((t) => [t.name, t]));
+    assert.deepEqual(Object.keys(by).sort(), ['notes', 'notes_feed', 'safe_notes']);
+    assert.equal(by.notes_feed.isView, true);
+    assert.equal(by.safe_notes.isView, true);
+    assert.equal(by.notes.isView, false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

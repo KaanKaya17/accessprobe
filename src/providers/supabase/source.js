@@ -54,7 +54,7 @@ export function sourceToDefinitions(src) {
       if (c.notNull && !c.hasDefault) required.push(col);
     }
     definitions[name] = { properties, required, 'x-name-only': Boolean(t.nameOnly) };
-    paths[`/${name}`] = { get: {}, post: {}, patch: {}, delete: {} };
+    paths[`/${name}`] = t.isView ? { get: {} } : { get: {}, post: {}, patch: {}, delete: {} };
   }
   for (const r of src.rpcs) paths[`/rpc/${r}`] = { post: {} };
   return { definitions, paths };
@@ -70,6 +70,11 @@ function parseSql(sql, tables) {
     const t = tables.get(m[1]) || { columns: new Map(), pkCols: new Set() };
     for (const part of splitTop(body)) parseColumnOrConstraint(part.trim(), t);
     tables.set(m[1], t);
+  }
+  // views: only the name is needed, they are tested by looking for A's rows in their output
+  const viewRe = /create\s+(?:or\s+replace\s+)?(?:temp(?:orary)?\s+)?(?:recursive\s+)?view\s+(?:if\s+not\s+exists\s+)?(?:public\.)?"?(\w+)"?/gi;
+  while ((m = viewRe.exec(clean))) {
+    if (!tables.has(m[1])) tables.set(m[1], { columns: new Map(), pkCols: new Set(), nameOnly: true, isView: true });
   }
   const alterRe = /alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?:public\.)?"?(\w+)"?\s+([^;]+);/gi;
   while ((m = alterRe.exec(clean))) {
