@@ -2,3 +2,4 @@ node_modules/
 *-report.md
 report.md
 *-debug.log
+private/

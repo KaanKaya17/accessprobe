@@ -12,13 +12,41 @@ export const label = 'Firebase';
 
 const COLLECTION_IN_BUNDLE = /\bcollection(?:Group)?\(\s*(?:[\w$.]+\s*,\s*)?["'`]([A-Za-z_][\w-]*)["'`]/g;
 
+const sourceCache = new Map();
+const sourceOf = (dir) => {
+  if (!sourceCache.has(dir)) sourceCache.set(dir, scanSource(dir));
+  return sourceCache.get(dir);
+};
+
+// A google-services.json alone is not enough: many apps only use Firebase for push or analytics.
+// Firebase is tested when the project actually uses one of its databases or Storage.
 export async function detect(opts, { site }) {
   if (opts.apiKey || opts.projectId) return true;
   if (site && extract(site.sources).configs.length) return true;
   if (opts.source) {
-    return ['firebase.json', 'firestore.rules', 'google-services.json', join('app', 'google-services.json')].some((f) => existsSync(join(opts.source, f)));
+    if (['firestore.rules', 'database.rules.json', 'storage.rules'].some((f) => existsSync(join(opts.source, f)))) return true;
+    const src = await sourceOf(opts.source);
+    return src.configs.length > 0 && (src.collections.length > 0 || src.rtdbCodePaths.length > 0 || Boolean(src.firestoreRules || src.databaseRules || src.storageRules));
   }
   return false;
+}
+
+// One project, never a guess: several DIFFERENT Firebase projects in one folder (dev + prod
+// google-services.json, say) need --project-id.
+function pickConfig(configs, opts) {
+  const ids = [...new Set(configs.map((c) => c.projectId))];
+  if (opts.projectId) return configs.find((c) => c.projectId === opts.projectId) || configs[0] || null;
+  if (ids.length > 1) throw new Error(`Several Firebase projects are configured here: ${ids.join(', ')}\n  Pass --project-id to choose which one to test.`);
+  return configs[0] || null;
+}
+
+export async function describe(opts, { site }) {
+  const fromSite = site ? extract(site.sources).configs : [];
+  const src = opts.source ? await sourceOf(opts.source) : { configs: [] };
+  const cfg = pickConfig([...fromSite, ...src.configs], opts);
+  const id = opts.projectId || cfg?.projectId;
+  if (!id) throw new Error('Firebase apiKey / projectId not found. Pass --api-key and --project-id, or --site / --source.');
+  return `Firebase project "${id}"${opts.emulator ? ' (local emulator)' : ''}`;
 }
 
 export async function scan(opts, { site, log }) {
@@ -31,7 +59,7 @@ export async function scan(opts, { site, log }) {
   let cfg = null;
   const fromSite = site ? extract(site.sources) : { configs: [], findings: [] };
   findings.push(...fromSite.findings);
-  const src = opts.source ? await scanSource(opts.source) : { configs: [], collections: [] };
+  const src = opts.source ? { ...(await sourceOf(opts.source)) } : { configs: [], collections: [] };
   // rules exported from the console (e.g. firebase database:get /.settings/rules) override files in --source
   for (const [flag, key] of [
     ['databaseRules', 'databaseRules'],
@@ -40,7 +68,7 @@ export async function scan(opts, { site, log }) {
   ]) {
     if (opts[flag]) src[key] = await readFile(opts[flag], 'utf8');
   }
-  cfg = fromSite.configs[0] || src.configs[0] || null;
+  cfg = pickConfig([...fromSite.configs, ...src.configs], opts);
   if (opts.projectId && cfg && cfg.projectId !== opts.projectId) {
     // the found config belongs to ANOTHER project: its database URL / bucket would point at the
     // wrong store (in the emulator: a fresh, rule-less namespace that makes everything look open)
@@ -49,7 +77,6 @@ export async function scan(opts, { site, log }) {
   }
   if (opts.apiKey || opts.projectId) cfg = { ...(cfg || {}), ...(opts.apiKey && { apiKey: opts.apiKey }), ...(opts.projectId && { projectId: opts.projectId }) };
   if (!cfg?.apiKey || !cfg?.projectId) throw new Error('Firebase apiKey / projectId not found. Pass --api-key and --project-id, or --site / --source.');
-  if (fromSite.configs.length + src.configs.length > 1) notes.push(`Several Firebase configs found, using project "${cfg.projectId}".`);
 
   // collection names also survive minification in the site bundle
   if (site) {

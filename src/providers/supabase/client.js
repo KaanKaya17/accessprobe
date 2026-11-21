@@ -26,13 +26,26 @@ export class SupabaseClient {
         payload = JSON.stringify(body);
       }
     }
-    const res = await fetch(this.url + path, {
-      method,
-      headers: h,
-      body: payload,
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-    const text = await res.text();
+    let res;
+    let text;
+    try {
+      res = await fetch(this.url + path, {
+        method,
+        headers: h,
+        body: payload,
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      text = await res.text();
+    } catch (e) {
+      // network error / timeout: an inconclusive result (status 0), never a crash and never a PASS
+      return {
+        ok: false,
+        status: 0,
+        data: { message: `network error: ${e.cause?.code || e.name || e.message}` },
+        headers: new Headers(),
+        evidence: `${method} ${path} → network error`,
+      };
+    }
     let data = text;
     try {
       data = text ? JSON.parse(text) : null;
@@ -70,7 +83,18 @@ export class SupabaseClient {
     });
   }
 
+  // Last line of defence: PostgREST applies an UPDATE/DELETE without a filter to EVERY row.
+  // Writes are only ever sent with equality filters that pin down a test row.
+  static safeFilter(filter) {
+    return typeof filter === 'string' && filter.length > 0 && filter.split('&').every((p) => /^[A-Za-z_]\w*=eq\..+/.test(p));
+  }
+
+  refused(method, table) {
+    return Promise.resolve({ ok: false, status: 0, data: { message: 'refused by rlsprobe: no safe row filter' }, headers: new Headers(), evidence: `${method} /rest/v1/${table} → not sent (no safe filter)` });
+  }
+
   update(table, filter, patch, { token } = {}) {
+    if (!SupabaseClient.safeFilter(filter)) return this.refused('PATCH', table);
     return this.request('PATCH', `/rest/v1/${encodeURIComponent(table)}?${filter}`, {
       token,
       body: patch,
@@ -79,6 +103,7 @@ export class SupabaseClient {
   }
 
   remove(table, filter, { token } = {}) {
+    if (!SupabaseClient.safeFilter(filter)) return this.refused('DELETE', table);
     return this.request('DELETE', `/rest/v1/${encodeURIComponent(table)}?${filter}`, {
       token,
       headers: { Prefer: 'return=representation' },
@@ -117,6 +142,11 @@ export class SupabaseClient {
 
   download(bucket, path, { token } = {}) {
     return this.request('GET', `/storage/v1/object/authenticated/${encodeURIComponent(bucket)}/${path}`, { token });
+  }
+
+  // public buckets: what any visitor can fetch, no Authorization beyond the anon key
+  downloadPublic(bucket, path) {
+    return this.request('GET', `/storage/v1/object/public/${encodeURIComponent(bucket)}/${path}`);
   }
 
   deleteObjects(bucket, paths, { token } = {}) {

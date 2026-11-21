@@ -1,4 +1,7 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { SupabaseClient, decodeJwt } from './client.js';
+import { findProjectConfig } from './project-config.js';
 import { extract } from './discover.js';
 import { parseSchema } from './schema.js';
 import { scanSource, sourceToDefinitions } from './source.js';
@@ -9,41 +12,71 @@ const CLEANUP_RPC_HINT = /^(delete_(my_)?(own_)?(account|user|profile)|delete_me
 export const id = 'supabase';
 export const label = 'Supabase';
 
-// Is this app a Supabase app? Explicit flags, config in the site bundle, or a supabase/ folder.
+// project folder config is looked up once per run and shared by detect() and scan()
+const projectCache = new Map();
+const projectConfig = (dir) => {
+  if (!projectCache.has(dir)) projectCache.set(dir, findProjectConfig(dir));
+  return projectCache.get(dir);
+};
+
+// Is this app a Supabase app? Explicit flags, config in the site bundle, a supabase/ folder,
+// or a Supabase URL/anon key somewhere in the project (.env, local.properties, client code).
 export async function detect(opts, { site }) {
   if (opts.url || opts.anonKey) return true;
   if (site && extract(site.sources).anonKeys.length) return true;
   if (opts.source) {
-    const { existsSync } = await import('node:fs');
-    const { join } = await import('node:path');
-    return existsSync(join(opts.source, 'supabase'));
+    if (existsSync(join(opts.source, 'supabase'))) return true;
+    const cfg = await projectConfig(opts.source);
+    return cfg.urls.length > 0 && cfg.anonKeys.length > 0;
   }
   return false;
 }
 
-export async function scan(opts, { site, log }) {
-  const t0 = Date.now();
+// Which Supabase project will be touched — shared by describe() (shown before asking for
+// consent) and scan(), so what the user approves is exactly what gets tested.
+async function resolveTarget(opts, site) {
   const findings = [];
-  const passed = [];
   const notes = [];
   let { url, anonKey } = opts;
-
-  // 1. config from the live site (already fetched by core)
   if (site) {
-    log(`→ Looking for Supabase config in ${site.url}`);
     const d = extract(site.sources);
     findings.push(...d.findings);
     url ||= d.urls[0];
     anonKey ||= d.anonKeys[0];
-    if (d.urls.length > 1) notes.push(`Multiple Supabase URLs found, using ${url}: ${d.urls.join(', ')}`);
+    if (d.urls.length > 1) notes.push(`Multiple Supabase URLs found in the site, using ${url}: ${d.urls.join(', ')}`);
+  }
+  if (opts.source) {
+    const pc = await projectConfig(opts.source);
+    findings.push(...pc.findings);
+    notes.push(...pc.notes);
+    if (!url && pc.urls.length > 1) {
+      // e.g. .env (production) and .env.local (local): never guess which one to write test users to
+      throw new Error(`Several Supabase projects are configured in this folder: ${pc.urls.join(', ')}\n  Pass --url to choose which one to test.`);
+    }
+    url ||= pc.urls[0];
+    anonKey ||= pc.anonKeys[0];
   }
   if (!url || !anonKey) {
-    throw new Error('Supabase URL / anon key not found. Pass them with --url and --anon-key.');
+    throw new Error('Supabase URL / anon key not found. Pass them with --url and --anon-key (the public anon key, never the service_role key).');
   }
   const payload = decodeJwt(anonKey);
   if (payload?.role === 'service_role' || anonKey.startsWith('sb_secret_')) {
     throw new Error('That is a service_role / secret key. Pass the public anon key — the tool must see what an attacker sees.');
   }
+  return { url: url.replace(/\/+$/, ''), anonKey, findings, notes };
+}
+
+export async function describe(opts, { site }) {
+  const { url } = await resolveTarget(opts, site);
+  return `Supabase project ${url}`;
+}
+
+export async function scan(opts, { site, log }) {
+  const t0 = Date.now();
+  const passed = [];
+  const { url, anonKey, findings, notes } = await resolveTarget(opts, site);
+  if (site) log(`→ Supabase config from ${site.url}`);
+  if (!opts.url && opts.source) log(`  Supabase project: ${url}`);
 
   const client = new SupabaseClient({ url, anonKey });
 
@@ -51,6 +84,7 @@ export async function scan(opts, { site, log }) {
   log('→ Signing in two test users (A and B)');
   const users = await setupUsers(client, { userA: opts.userA, userB: opts.userB, emailDomain: opts.emailDomain, log });
 
+  const created = []; // test rows, cleaned up in finally even if a probe throws
   try {
     // 3. schema — as anon AND as a signed-in user: PostgREST only lists what the role may touch
     log(`→ Reading API schema from ${url}/rest/v1/`);
@@ -69,7 +103,7 @@ export async function scan(opts, { site, log }) {
 
     // 4. probes
     log('→ Testing tables');
-    const tables = await probeTables(client, schema, users, { log });
+    const tables = await probeTables(client, schema, users, { log, created });
     findings.push(...tables.findings);
     passed.push(...tables.passed);
 
@@ -81,11 +115,6 @@ export async function scan(opts, { site, log }) {
 
     notes.push(...tables.skipped, ...storage.skipped);
     findings.push(...rpcReview(schema));
-
-    // 5. cleanup rows
-    log('→ Cleaning up test data');
-    const left = await cleanupRows(client, tables.created, users);
-    if (left.length) notes.push(`Could not delete some test rows, remove them manually: ${left.join('; ')}`);
 
     const hint = schema.rpcs.find((r) => CLEANUP_RPC_HINT.test(r));
     if (!opts.cleanupRpc && hint && users.some((u) => u.created)) {
@@ -115,7 +144,10 @@ export async function scan(opts, { site, log }) {
       },
     };
   } finally {
-    // 6. test users — always, even if a probe crashed
+    // 5. test rows, then 6. test users — always, even if a probe crashed
+    log('→ Cleaning up test data');
+    const left = await cleanupRows(client, created, users);
+    if (left.length) notes.push(`Could not delete some test rows, remove them manually: ${left.join('; ')}`);
     await cleanupUsers(client, users, opts.cleanupRpc, notes);
   }
 }

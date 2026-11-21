@@ -16,8 +16,14 @@ rlsprobe doesn't guess. It signs up **two real test users** in your app, has use
 files, then checks whether user B (or an anonymous visitor) can **read, change or delete** them.
 
 ```bash
-npx rlsprobe --site https://your-app.lovable.app
+cd your-app
+npx rlsprobe
 ```
+
+That's it. rlsprobe finds your Supabase or Firebase config in `.env`, `local.properties`,
+`google-services.json` or your code, using only the public key an attacker would also see. Then it
+reads your migrations or rules and runs the tests. Add `--site https://your-app.com` to also check
+the deployed JavaScript bundle for leaked secret keys.
 
 ```
 ✖ CRITICAL  User B can read user A's rows in "orders"
@@ -35,6 +41,26 @@ npx rlsprobe --site https://your-app.lovable.app
 - **Fixes included.** `--out report.md` gives the exact policy SQL or Security Rules for every finding, plus a prompt you can paste into Lovable, Bolt, Cursor or Claude Code.
 - **Local and open source.** It runs on your machine and needs only the public keys an attacker can also see. Nothing is sent anywhere else.
 - **Zero dependencies.** Node 20+ is all you need.
+
+## Using it with Claude Code, Codex or Cursor
+
+Run this once in your project:
+
+```bash
+npx rlsprobe setup-agent
+```
+
+It adds a Claude Code skill (`.claude/skills/rlsprobe/SKILL.md`) and a short section to `AGENTS.md`,
+which Codex, Cursor and other agents read. Then just ask your agent: *"check my database rules with
+rlsprobe"*.
+
+The skill tells the agent to:
+
+- confirm you own the app before testing;
+- report only proven findings and say clearly what wasn't tested;
+- before tightening a rule, read every place in your code that uses that data. A rule that blocks a
+  read your app depends on breaks the app for every user;
+- test the fix locally (Firebase Emulator Suite or a Supabase branch), and **ask you before deploying**.
 
 ## What it tests
 

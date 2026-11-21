@@ -3,7 +3,7 @@
 
 import { readdir, readFile } from 'node:fs/promises';
 import { join, extname, basename } from 'node:path';
-import { fromGoogleServicesJson, fromPlist } from './discover.js';
+import { fromGoogleServicesJson, fromPlist, extract } from './discover.js';
 import { rtdbPathsFromCode } from './rtdb-code.js';
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'build', 'dist', '.gradle', '.next', '.idea', '.dart_tool', 'Pods', 'out', 'coverage']);
@@ -28,6 +28,11 @@ export async function scanSource(dir) {
     else if (CODE_EXT.has(extname(f))) {
       const text = await readFile(f, 'utf8');
       if (/getReference|DatabaseReference/.test(text)) codeTexts.push(text);
+      // web apps: initializeApp({ apiKey: "AIza…", projectId: … }) in client code
+      if (/AIza[0-9A-Za-z_-]{35}/.test(text)) {
+        const shown = f.slice(dir.length).replace(/^[\\/]/, '').replace(/\\/g, '/');
+        for (const c of extract([{ where: shown, text }]).configs) out.configs.push(c);
+      }
       // collection(db, "orders") / db.collection("orders") / .collection('orders') / collectionGroup("x")
       for (const m of text.matchAll(/\bcollection(?:Group)?\(\s*(?:[\w.]+\s*,\s*)?["'`]([A-Za-z_][\w-]*)["'`]/g)) out.collections.add(m[1]);
       // doc(db, "users", uid) — first segment is a collection

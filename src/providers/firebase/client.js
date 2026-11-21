@@ -48,20 +48,27 @@ export class FirebaseClient {
         payload = JSON.stringify(body);
       }
     }
-    const res = await fetch(url, { method, headers: h, body: payload, signal: AbortSignal.timeout(this.timeoutMs) });
-    const text = await res.text();
-    let data = text;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      /* keep text */
-    }
     const shown = url
       .replace(/([?&])key=[^&]+/, '$1key=<apiKey>')
       .replace(/([?&])auth=[^&]+/, '$1auth=<token>')
       .replace(this.ep.firestore, '…/documents')
       .replace(this.ep.storage || '\u0000', '…')
       .replace(/^https?:\/\/[^/]+(?=\/[^?]*\.json)/, '');
+    let res;
+    let text;
+    try {
+      res = await fetch(url, { method, headers: h, body: payload, signal: AbortSignal.timeout(this.timeoutMs) });
+      text = await res.text();
+    } catch (e) {
+      // network error / timeout / bad URL: inconclusive (status 0), never a crash and never a PASS
+      return { ok: false, status: 0, data: { error: `network error: ${e.cause?.code || e.name || e.message}` }, evidence: `${method} ${shown} → network error` };
+    }
+    let data = text;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      /* keep text */
+    }
     return { ok: res.ok, status: res.status, data, evidence: `${method} ${shown} → ${res.status}` };
   }
 

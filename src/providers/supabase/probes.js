@@ -105,11 +105,11 @@ function meExpr(t, schema) {
   return '(select auth.uid())';
 }
 
-export async function probeTables(client, schema, [A, B], { log }) {
+export async function probeTables(client, schema, [A, B], { log, created = [] }) {
   const findings = [];
   const passed = [];
   const skipped = [];
-  const created = []; // rows to clean up
+  // rows to clean up — owned by the caller, so cleanup still runs if a probe throws
   let fullyTested = 0; // tables where A created a row and B attacked it
   let readOnly = 0; // tables users can't write to at all (no INSERT grant)
 
@@ -137,7 +137,7 @@ export async function probeTables(client, schema, [A, B], { log }) {
     let anonBlocked = false;
     if (!t.isView && !t.nameOnly) {
       const built = buildRow(t, { ownerId: aVal, marker: `rlsprobe-anon-${rand()}` });
-      if (built && (built.markerCol || t.pk)) {
+      if (built && (built.markerCol || (t.pkCols || []).length)) {
         anonTried = true;
         const r = await insertWithRetry(client, t, built.row, undefined);
         if (inserted(r)) {
@@ -232,13 +232,17 @@ export async function probeTables(client, schema, [A, B], { log }) {
     let mine = null;
     let insertErr = built ? null : 'required columns that rlsprobe cannot fill (foreign keys)';
     let denied = false;
-    if (built && !built.markerCol && !t.pk) {
+    if (built && !built.markerCol && !(t.pkCols || []).length) {
       insertErr = 'no primary key and no text column, so a test row could not be targeted safely';
     } else if (built) {
       const r = await insertWithRetry(client, t, built.row, A.token);
       if (inserted(r)) {
         mine = { table: t, row: r.data[0], markerCol: built.markerCol, marker, sent: built.row };
-        created.push(mine);
+        if (!filterFor(mine)) {
+          // representation lacked the key columns: we could not target it again, so don't keep it
+          skipped.push(`${t.name}: test row could not be targeted (no key values returned); tests skipped`);
+          mine = null;
+        } else created.push(mine);
       } else {
         insertErr = `${r.status} ${msg(r.data)}`;
         denied = privilegeDenied(r);
@@ -246,7 +250,7 @@ export async function probeTables(client, schema, [A, B], { log }) {
     }
 
     if (!mine) {
-      // fallback: can B see rows that belong to other users?
+      // fallback: can B see rows that belong to other users? (real rows → counts only, a warning)
       if (t.owner) {
         const r = await client.select(t.name, { token: B.token, filter: `${t.owner.name}=neq.${bVal}`, limit: 1 });
         if (privilegeDenied(r)) {
@@ -258,41 +262,58 @@ export async function probeTables(client, schema, [A, B], { log }) {
           if (n > 0 && !(anonCount > 0)) {
             tf({
               id: 'cross-user-read-existing',
-              severity: 'critical',
+              severity: 'warning',
               title: `Logged-in user B can read ${n} row(s) of OTHER users in "${t.name}"`,
-              detail: `B only owns its own rows, but sees rows where ${t.owner.name} ≠ B. Typical cause: a policy like using (auth.role() = 'authenticated') or using (true).`,
+              detail: `B owns nothing here but sees rows where ${t.owner.name} ≠ B. Not proven with test data (rlsprobe could not create a test row), so check whether this table is meant to be shared. Typical cause: using (auth.role() = 'authenticated') or using (true).`,
               evidence: `as user B: ${r.evidence} — ${n} foreign rows visible`,
               fix: { sql: pol() },
             });
           } else if (n === 0) {
-            passed.push(`${t.name}: B cannot see other users' rows`);
+            skipped.push(`${t.name}: B sees no other users' rows — not proven (no test row; the table may simply be empty)`);
           }
         }
       }
       if (!t.owner) await freshUserCheck(client, t, B, { tf, passed, skipped, anonCount });
-      if (!anonNoAccess && !(anonCount > 0)) passed.push(`${t.name}: anonymous visitors see no rows (not proven: no test row)`);
+      if (!anonNoAccess && !(anonCount > 0)) skipped.push(`${t.name}: anonymous visitors see no rows — not proven (no test row)`);
       if (denied) {
         readOnly++;
         passed.push(`${t.name}: users cannot insert rows directly (no INSERT privilege)`);
-      }
-      else skipped.push(`${t.name}: write tests skipped — user A could not insert a test row (${insertErr})`);
+      } else skipped.push(`${t.name}: write tests skipped — user A could not insert a test row (${insertErr})`);
       continue;
     }
 
-    const filter = filterFor(mine);
+    // control: A reads its own row back through the exact filter every attack uses.
+    // Without this, an empty answer to B could mean "wrong filter" instead of "protected".
+    const aRow = async () => {
+      const r = await client.select(t.name, { token: A.token, filter: filterFor(mine) });
+      return r.ok && Array.isArray(r.data) && r.data.length === 1 ? r.data[0] : null;
+    };
+    if (!(await aRow())) {
+      skipped.push(`${t.name}: user A cannot read back its own test row, so B's results would prove nothing`);
+      continue;
+    }
     fullyTested++;
+    // PostgREST hides rows instead of erroring: 200 [] (or an explicit 401/403/42501) is a refusal
+    const refusedOrHidden = (r) => policyDenied(r) || (r.ok && Array.isArray(r.data) && r.data.length === 0);
+    const unchanged = async () => {
+      const row = await aRow();
+      return Boolean(row) && (!mine.markerCol || row[mine.markerCol] === mine.marker) && (!t.owner || String(row[t.owner.name]) === String(aVal));
+    };
+    const publicHint = PUBLIC_TABLE.test(t.name);
 
     // 4) B reads A's row
-    const bRead = await client.select(t.name, { token: B.token, filter });
+    const bRead = await client.select(t.name, { token: B.token, filter: filterFor(mine) });
     const bSees = bRead.ok && Array.isArray(bRead.data) && bRead.data.length > 0;
     if (bSees && t.owner) {
       const total = await client.select(t.name, { token: B.token, filter: `${t.owner.name}=neq.${bVal}`, limit: 1 });
       const n = total.total ?? '?';
       tf({
         id: 'cross-user-read',
-        severity: 'critical',
+        severity: publicHint ? 'warning' : 'critical',
         title: `User B can read user A's rows in "${t.name}"`,
-        detail: `Proven: A created a row, B fetched it. In total B can see ${n} row(s) that belong to other users.`,
+        detail: publicHint
+          ? `Proven: A created a row, B fetched it (B can see ${n} row(s) of other users). The table name suggests content meant for everyone (posts, comments, products…) — fine if intended.`
+          : `Proven: A created a row, B fetched it. In total B can see ${n} row(s) that belong to other users.`,
         evidence: `as user B: ${bRead.evidence} → returned A's row`,
         fix: { sql: pol() },
       });
@@ -306,35 +327,34 @@ export async function probeTables(client, schema, [A, B], { log }) {
         evidence: `as user B: ${bRead.evidence} → returned A's row`,
         fix: { sql: noOwnerColumn(t.name) },
       });
-    } else {
-      passed.push(`${t.name}: B cannot read A's rows`);
-    }
+    } else if (refusedOrHidden(bRead)) passed.push(`${t.name}: B cannot read A's rows`);
+    else skipped.push(`${t.name}: read test inconclusive (${bRead.status} ${msg(bRead.data)})`);
 
     // 4b) anonymous visitor reads A's row (proves what an empty anon SELECT could not)
     if (!anonNoAccess && !(anonCount > 0)) {
-      const aRead = await client.select(t.name, { filter });
+      const aRead = await client.select(t.name, { filter: filterFor(mine) });
       if (inserted(aRead)) {
         tf({
           id: t.owner ? 'anon-read-owned' : 'anon-read-public',
-          severity: t.owner ? 'critical' : 'warning',
-          title: t.owner
-            ? `Anyone (not logged in) can read user rows in "${t.name}"`
-            : `"${t.name}" is publicly readable`,
+          severity: t.owner && !publicHint ? 'critical' : 'warning',
+          title: t.owner ? `Anyone (not logged in) can read user rows in "${t.name}"` : `"${t.name}" is publicly readable`,
           detail: t.owner
-            ? `Proven: A created a row, an anonymous request fetched it.`
+            ? 'Proven: A created a row, an anonymous request fetched it.'
             : 'Fine for public content (catalog, guestbook, blog). Not fine if it holds anything personal.',
           evidence: `anonymous: ${aRead.evidence} → returned A's row`,
           fix: { sql: t.owner ? pol(['select']) : enableRls(t.name) },
         });
-      } else passed.push(`${t.name}: anonymous visitors cannot read A's rows`);
+      } else if (refusedOrHidden(aRead)) passed.push(`${t.name}: anonymous visitors cannot read A's rows`);
+      else skipped.push(`${t.name}: anonymous read test inconclusive (${aRead.status} ${msg(aRead.data)})`);
     }
 
-    // 5) B updates A's row (text marker column, or any other plain column)
+    // 5) B updates A's row (marker column — same length, so length limits can't fake a PASS)
     const patch = updatePatch(t, mine);
     if (patch) {
-      const bUpd = await client.update(t.name, filter, patch, { token: B.token });
+      const bUpd = await client.update(t.name, filterFor(mine), patch, { token: B.token });
       if (inserted(bUpd)) {
-        if (mine.markerCol in patch) mine.marker = patch[mine.markerCol];
+        if (mine.markerCol && mine.markerCol in patch) mine.marker = patch[mine.markerCol];
+        Object.assign(mine.row, bUpd.data[0]);
         tf({
           id: 'cross-user-update',
           severity: 'critical',
@@ -343,21 +363,38 @@ export async function probeTables(client, schema, [A, B], { log }) {
           evidence: `as user B: ${bUpd.evidence}`,
           fix: { sql: t.owner ? pol(['update']) : noOwnerColumn(t.name) },
         });
-      } else {
-        passed.push(`${t.name}: B cannot modify A's rows`);
-      }
+      } else if (refusedOrHidden(bUpd) && (await unchanged())) passed.push(`${t.name}: B cannot modify A's rows`);
+      else skipped.push(`${t.name}: modify test inconclusive (${bUpd.status} ${msg(bUpd.data)})`);
+    }
+
+    // 5b) B reassigns A's row to itself (USING lets it in, WITH CHECK only checks the NEW owner)
+    let takenOver = false;
+    if (t.owner && !t.owner.pk && bVal !== null) {
+      const bTake = await client.update(t.name, filterFor(mine), { [t.owner.name]: bVal }, { token: B.token });
+      if (inserted(bTake)) {
+        takenOver = true;
+        Object.assign(mine.row, bTake.data[0]);
+        tf({
+          id: 'cross-user-takeover',
+          severity: 'critical',
+          title: `User B can take over user A's rows in "${t.name}"`,
+          detail: `Proven: B set ${t.owner.name} of A's row to itself. The UPDATE policy's USING clause lets B reach other users' rows; WITH CHECK only looks at the new value.`,
+          evidence: `as user B: ${bTake.evidence.split(JSON.stringify(bVal)).join('"<user B id>"')}`,
+          fix: { sql: pol(['update']) },
+        });
+      } else if (refusedOrHidden(bTake) && (await unchanged())) passed.push(`${t.name}: B cannot reassign A's rows to itself`);
+      else skipped.push(`${t.name}: takeover test inconclusive (${bTake.status} ${msg(bTake.data)})`);
     }
 
     // 6) B inserts a row pretending to be A
     if (t.owner) {
       // same values A used successfully, so only a policy can make this fail
-      const fakeMarker = `rlsprobe-fake-${rand()}`;
+      const fakeMarker = `rlsprobe-${rand()}`;
       const row = { ...mine.sent };
       if (mine.markerCol) row[mine.markerCol] = fakeMarker;
-      const fake = { row, markerCol: mine.markerCol };
       const r = await client.insert(t.name, row, { token: B.token });
       if (inserted(r)) {
-        created.push({ table: t, row: r.data[0], markerCol: fake.markerCol, marker: fakeMarker });
+        created.push({ table: t, row: r.data[0], markerCol: mine.markerCol, marker: fakeMarker });
         tf({
           id: 'impersonated-insert',
           severity: 'critical',
@@ -374,19 +411,22 @@ export async function probeTables(client, schema, [A, B], { log }) {
     }
 
     // 7) B deletes A's row (last, it destroys the test row)
-    const bDel = await client.remove(t.name, filterFor(mine), { token: B.token });
-    if (bDel.ok && Array.isArray(bDel.data) && bDel.data.length) {
-      mine.deleted = true;
-      tf({
-        id: 'cross-user-delete',
-        severity: 'critical',
-        title: `User B can DELETE user A's rows in "${t.name}"`,
-        detail: 'Proven: B deleted a row that A created.',
-        evidence: `as user B: ${bDel.evidence}`,
-        fix: { sql: t.owner ? pol(['delete']) : noOwnerColumn(t.name) },
-      });
+    if (takenOver) {
+      skipped.push(`${t.name}: delete test skipped — B already took the row over`);
     } else {
-      passed.push(`${t.name}: B cannot delete A's rows`);
+      const bDel = await client.remove(t.name, filterFor(mine), { token: B.token });
+      if (inserted(bDel)) {
+        mine.deleted = true;
+        tf({
+          id: 'cross-user-delete',
+          severity: 'critical',
+          title: `User B can DELETE user A's rows in "${t.name}"`,
+          detail: 'Proven: B deleted a row that A created.',
+          evidence: `as user B: ${bDel.evidence}`,
+          fix: { sql: t.owner ? pol(['delete']) : noOwnerColumn(t.name) },
+        });
+      } else if (refusedOrHidden(bDel) && (await aRow())) passed.push(`${t.name}: B cannot delete A's rows`);
+      else skipped.push(`${t.name}: delete test inconclusive (${bDel.status} ${msg(bDel.data)})`);
     }
   }
 
@@ -448,27 +488,38 @@ export async function probeStorage(client, [A, B], { extraBuckets = [], log }) {
       continue;
     }
     const shown = path.replace(A.id, '<user A id>');
+    // control: A can download its own file — otherwise B's refusal could just mean "wrong path"
+    const aGet = await client.download(bucket, path, { token: A.token });
+    const aCan = aGet.ok;
+    if (!aCan) skipped.push(`${bucket}: user A cannot download its own file (${aGet.status}), so B's download result proves nothing`);
 
-    const bGet = await client.download(bucket, path, { token: B.token });
-    if (bGet.ok && isPublic.has(bucket)) {
+    if (isPublic.has(bucket)) {
+      // public buckets serve every file at /object/public/… to anyone: never a "B cannot download" PASS
+      const pub = await client.downloadPublic(bucket, path);
       bf({
         id: 'storage-public-bucket',
         severity: 'info',
         title: `Bucket "${bucket}" is public — every file in it can be downloaded by URL`,
-        detail: 'That is what public buckets are for (avatars, product images). Never put private uploads in it.',
-        evidence: `bucket "${bucket}" has public = true`,
+        detail: pub.ok
+          ? 'Proven: an anonymous request fetched the test file through the public URL. That is what public buckets are for (avatars, product images). Never put private uploads in it.'
+          : 'Marked public = true, so files are meant to be fetched by URL. Never put private uploads in it.',
+        evidence: pub.ok ? `anonymous: GET /storage/v1/object/public/${bucket}/${shown} → ${pub.status}` : `bucket "${bucket}" has public = true`,
         fix: null,
       });
-    } else if (bGet.ok) {
-      bf({
-        id: 'storage-cross-user-read',
-        severity: 'critical',
-        title: `User B can download user A's private files in "${bucket}"`,
-        detail: 'Proven: A uploaded a file into its own folder, B downloaded it.',
-        evidence: `as user B: GET /storage/v1/object/authenticated/${bucket}/${shown} → ${bGet.status}`,
-        fix: { sql: storagePolicies(bucket) },
-      });
-    } else passed.push(`${bucket}: B cannot download A's files`);
+    } else {
+      const bGet = await client.download(bucket, path, { token: B.token });
+      if (bGet.ok) {
+        bf({
+          id: 'storage-cross-user-read',
+          severity: 'critical',
+          title: `User B can download user A's private files in "${bucket}"`,
+          detail: 'Proven: A uploaded a file into its own folder, B downloaded it.',
+          evidence: `as user B: GET /storage/v1/object/authenticated/${bucket}/${shown} → ${bGet.status}`,
+          fix: { sql: storagePolicies(bucket) },
+        });
+      } else if (aCan && bGet.status >= 400 && bGet.status < 500) passed.push(`${bucket}: B cannot download A's files`);
+      else if (aCan) skipped.push(`${bucket}: download test inconclusive (${bGet.status} ${msg(bGet.data)})`);
+    }
 
     const bDel = await client.deleteObjects(bucket, [path], { token: B.token });
     let deleted = false;
@@ -482,9 +533,17 @@ export async function probeStorage(client, [A, B], { extraBuckets = [], log }) {
         evidence: `as user B: DELETE /storage/v1/object/${bucket} {"prefixes":["${shown}"]} → ${bDel.status}`,
         fix: { sql: storagePolicies(bucket) },
       });
-    } else passed.push(`${bucket}: B cannot delete A's files`);
+    } else {
+      // Storage, like PostgREST, answers a hidden delete with 200 []: confirm the file survived
+      const still = aCan ? await client.download(bucket, path, { token: A.token }) : null;
+      if ((bDel.ok || (bDel.status >= 400 && bDel.status < 500)) && still?.ok) passed.push(`${bucket}: B cannot delete A's files`);
+      else skipped.push(`${bucket}: delete test inconclusive (${bDel.status} ${msg(bDel.data)})`);
+    }
 
-    if (!deleted) await client.deleteObjects(bucket, [path], { token: A.token });
+    if (!deleted) {
+      const rm = await client.deleteObjects(bucket, [path], { token: A.token });
+      if (!(rm.ok && Array.isArray(rm.data) && rm.data.length)) skipped.push(`${bucket}: could not delete the test file ${shown} — remove it manually`);
+    }
   }
   return { findings, passed, skipped, count: names.size };
 }
@@ -525,8 +584,14 @@ async function insertWithRetry(client, t, row, token) {
   return r;
 }
 
+// tables whose rows are usually meant for every signed-in user (softens READ findings only)
+const PUBLIC_TABLE = /^(posts?|comments?|articles?|products?|reviews?|listings?|events?|categories|tags?|public_.*|announcements?)$/i;
+
+// same-length variant of a marker: varchar(n) limits can't make B's update fail for the wrong reason
+export const tamper = (m) => `${m.slice(0, -1)}${m.endsWith('x') ? 'y' : 'x'}`;
+
 function updatePatch(t, mine) {
-  if (mine.markerCol) return { [mine.markerCol]: `${mine.marker}-x` };
+  if (mine.markerCol) return { [mine.markerCol]: tamper(mine.marker) };
   // no text column: write back a plain column's current value — a no-op for the data,
   // but PostgREST still only returns the row if the UPDATE policy allowed it
   const c = t.columns.find((x) => !x.pk && x !== t.owner && !x.fk && mine.row[x.name] !== undefined && mine.row[x.name] !== null);
@@ -545,7 +610,8 @@ async function freshUserCheck(client, t, B, { tf, passed, skipped, anonCount }) 
   const mineVals = new Set([B.id, ...Object.values(B.ids || {})].map(String));
   const foreign = (Array.isArray(r.data) ? r.data : []).filter((row) => !Object.values(row).some((v) => mineVals.has(String(v))));
   if (!foreign.length) {
-    passed.push(`${t.name}: a new user sees no foreign rows`);
+    // an empty answer proves nothing without a row we know exists
+    skipped.push(`${t.name}: a new user sees no foreign rows — not proven (the table may simply be empty)`);
     return;
   }
   if (anonCount > 0) return; // already reported as publicly readable
@@ -560,10 +626,19 @@ async function freshUserCheck(client, t, B, { tf, passed, skipped, anonCount }) 
   });
 }
 
-function filterFor(c) {
-  const pk = c.table.pk;
-  if (pk && c.row && c.row[pk.name] !== undefined) return `${pk.name}=eq.${encodeURIComponent(c.row[pk.name])}`;
-  return `${c.markerCol}=eq.${encodeURIComponent(c.marker)}`;
+// A filter that can only ever match the test row: EVERY primary-key column (composite keys
+// included) plus the marker. Returns null when the row cannot be pinned down — callers must
+// then not send UPDATE/DELETE at all.
+export function filterFor(c) {
+  const parts = [];
+  const pkCols = c.table.pkCols?.length ? c.table.pkCols : c.table.pk ? [c.table.pk] : [];
+  for (const col of pkCols) {
+    const v = c.row?.[col.name];
+    if (v === undefined || v === null) return null; // partial key: could match other rows
+    parts.push(`${col.name}=eq.${encodeURIComponent(v)}`);
+  }
+  if (c.markerCol && c.marker !== undefined) parts.push(`${c.markerCol}=eq.${encodeURIComponent(c.marker)}`);
+  return parts.length ? parts.join('&') : null;
 }
 
 export function msg(d) {

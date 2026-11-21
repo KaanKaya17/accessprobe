@@ -1,6 +1,6 @@
 {
   "name": "rlsprobe",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Prove your Supabase RLS and Firebase Security Rules actually work: two real test users, user B tries to read, change, forge and delete user A's data. Evidence, not guesses — plus fixes and a ready-to-paste AI prompt.",
   "type": "module",
   "bin": {
@@ -9,6 +9,7 @@
   "files": [
     "bin",
     "src",
+    "integrations",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"

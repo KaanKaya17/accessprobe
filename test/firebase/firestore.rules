@@ -35,6 +35,14 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // TAKEOVER: update only checks the NEW owner value, so anyone can reassign a doc to itself.
+    match /claims/{id} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+      allow update: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    }
+
     // CORRECT: per-user private subcollection.
     match /users/{uid}/private/{doc} {
       allow read, write: if request.auth != null && request.auth.uid == uid;

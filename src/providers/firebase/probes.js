@@ -11,6 +11,8 @@ import { parseRules, allowsFor, ownerField, ownerPathVar, staticFlags, collectio
 import * as fix from './fixes.js';
 
 const rand = () => Math.random().toString(36).slice(2, 8);
+// same-length variant of a marker (so a length check in the rules can't cause the refusal)
+const tamper = (m) => `${m.slice(0, -1)}${m.endsWith('x') ? 'y' : 'x'}`;
 const ok = (r) => r && r.ok;
 // Only an explicit refusal counts as "denied" (see test/firebase/API-NOTES.md, trap 8):
 // Firestore 403 PERMISSION_DENIED, Storage 403 "No X permission", RTDB 401 "Permission denied".
@@ -109,8 +111,14 @@ export async function probeFirestore(client, src, [A, B], { log }) {
   const passed = [];
   const skipped = [];
   const leftovers = [];
+  const left = [];
   let fullyTested = 0;
   const { targets, matches } = firestoreTargets(src);
+  // A 403 from a project whose Firestore API is off (or App Check-enforced) looks like a rule
+  // refusal. PASSes that rest only on such a refusal wait until some Firestore request succeeded.
+  const pendingPass = [];
+  let firestoreAnswers = false;
+  try {
 
   for (const m of matches) {
     for (const f of staticFlags(m)) {
@@ -147,6 +155,7 @@ export async function probeFirestore(client, src, [A, B], { log }) {
     for (const cand of payloadCandidates(t, A, marker)) {
       const r = await client.createDoc(aColl, docId, cand.data, { token: A.token });
       if (ok(r)) {
+        firestoreAnswers = true;
         mine = { path: `${aColl}/${docId}`, payload: cand.data, ownerField: cand.ownerField, markerField: cand.markerField };
         break;
       }
@@ -154,7 +163,7 @@ export async function probeFirestore(client, src, [A, B], { log }) {
     }
 
     if (!mine) {
-      await freshUserList(client, t, aColl, B, { tf, passed, skipped, owned });
+      await freshUserList(client, t, aColl, B, { tf, passed: pendingPass, skipped, owned });
       if (denied(lastErr)) skipped.push(`${t.collectionPath}: write tests skipped — user A may not create documents here (${lastErr.status} ${msg(lastErr.data)})`);
       else skipped.push(`${t.collectionPath}: write tests skipped — user A could not create a test document (${lastErr?.status} ${msg(lastErr?.data)})`);
       continue;
@@ -234,7 +243,7 @@ export async function probeFirestore(client, src, [A, B], { log }) {
     } else if (denied(anGet)) passed.push(`${t.collectionPath}: anonymous visitors cannot read`);
 
     // B modifies A's document
-    const patch = mine.markerField ? { [mine.markerField]: `${marker}-x` } : mine.ownerField ? { [mine.ownerField]: A.id } : null;
+    const patch = mine.markerField ? { [mine.markerField]: tamper(marker) } : mine.ownerField ? { [mine.ownerField]: A.id } : null;
     const bUpd = patch ? await client.updateDoc(mine.path, patch, { token: B.token }) : null;
     if (!patch) skipped.push(`${t.collectionPath}: modify test skipped (no field to change)`);
     else if (ok(bUpd)) {
@@ -248,6 +257,25 @@ export async function probeFirestore(client, src, [A, B], { log }) {
       });
     } else if (denied(bUpd)) passed.push(`${t.collectionPath}: B cannot modify A's documents`);
     else skipped.push(`${t.collectionPath}: modify test inconclusive (${bUpd.status} ${msg(bUpd.data)})`);
+
+    // B reassigns A's document to itself: rules that only check request.resource.data.owner
+    // (the NEW value) on update let anyone take other users' documents over
+    let takenOver = false;
+    if (mine.ownerField) {
+      const bTake = await client.updateDoc(mine.path, { [mine.ownerField]: B.id }, { token: B.token });
+      if (ok(bTake)) {
+        takenOver = true;
+        tf({
+          id: 'cross-user-takeover',
+          severity: 'critical',
+          title: `User B can take over user A's documents in "${t.collectionPath}"`,
+          detail: `Proven: B set ${mine.ownerField} of A's document to itself. The update rule checks only the new value (request.resource.data), not the current owner (resource.data).`,
+          evidence: `as user B: ${bTake.evidence}`,
+          fix: { code: rules() },
+        });
+      } else if (denied(bTake)) passed.push(`${t.collectionPath}: B cannot reassign A's documents to itself`);
+      else skipped.push(`${t.collectionPath}: takeover test inconclusive (${bTake.status} ${msg(bTake.data)})`);
+    }
 
     // B forges a document in A's name — identical payload to A's accepted one
     const forgeId = `rlsprobe-${rand()}`;
@@ -288,6 +316,10 @@ export async function probeFirestore(client, src, [A, B], { log }) {
     } else if (denied(anNew)) passed.push(`${t.collectionPath}: anonymous visitors cannot create documents`);
 
     // B deletes A's document (last: it destroys the test doc)
+    if (takenOver) {
+      skipped.push(`${t.collectionPath}: delete test skipped — B already took the document over`);
+      continue;
+    }
     const bDel = await client.deleteDoc(mine.path, { token: B.token });
     let gone = false;
     if (ok(bDel)) {
@@ -305,19 +337,21 @@ export async function probeFirestore(client, src, [A, B], { log }) {
 
     if (gone) leftovers.splice(leftovers.findIndex((l) => l.path === mine.path), 1);
   }
-
-  // cleanup
-  const left = [];
-  for (const l of leftovers) {
-    let done = false;
-    for (const u of l.by) {
-      if (ok(await client.deleteDoc(l.path, { token: u.token }))) {
-        done = true;
-        break;
+  } finally {
+    // cleanup runs even if a probe threw; the caller deletes the users only afterwards
+    for (const l of leftovers) {
+      let done = false;
+      for (const u of l.by) {
+        if (ok(await client.deleteDoc(l.path, { token: u.token }))) {
+          done = true;
+          break;
+        }
       }
+      if (!done) left.push(l.path);
     }
-    if (!done) left.push(l.path);
   }
+  if (firestoreAnswers) passed.push(...pendingPass);
+  else for (const p of pendingPass) skipped.push(`${p} — not proven: no Firestore request succeeded in this run (API disabled or App Check?)`);
   return { findings, passed, skipped, left, fullyTested, count: targets.length };
 }
 
@@ -392,7 +426,7 @@ async function freshUserList(client, t, coll, B, { tf, passed, skipped, owned })
   const cnt = await client.countDocs(coll, { token: B.token });
   tf({
     id: 'fresh-user-sees-docs',
-    severity: owned ? 'critical' : 'warning',
+    severity: 'warning',
     title: `A brand-new user can list ${cnt.count ?? `${foreign.length}+`} document(s) in "${t.collectionPath}"`,
     detail: owned
       ? 'Test user B was created seconds ago and owns nothing here, yet reads other users\' documents.'

@@ -49,7 +49,9 @@ test('bigint owner ids via an app users table (FitLog style) are resolved', () =
   assert.ok(leak);
   // fix SQL must compare against the app's id, not auth.uid() (bigint vs uuid would not even compile)
   assert.match(leak.fix.sql, /\(select "user_id" from public\."app_users" where "auth_id" = \(select auth\.uid\(\)\)\) = "user_id"/);
-  assert.ok(result.passed.includes("app_users: B cannot see other users' rows"));
+  // no test row could be created there, so "B sees nothing" is NOT a pass — it is reported as unproven
+  assert.ok(!result.passed.some((p) => p.startsWith('app_users: B ')));
+  assert.ok(result.notes.some((n) => n.startsWith("app_users: B sees no other users' rows — not proven")));
 });
 
 test('products: public catalog is only a warning', () => {
@@ -72,6 +74,30 @@ test('guestbook: intended anon insert is a warning and user tests still run', ()
 test('counters: no pk + no text column is skipped, never reported as passed', () => {
   assert.ok(!result.passed.some((p) => /^counters: B cannot (read|modify|delete|insert)/.test(p)));
   assert.ok(result.notes.some((n) => n.startsWith('counters:') && n.includes('targeted safely')));
+});
+
+test('composite primary key: only the test row is ever touched (other team members survive)', async () => {
+  // the mock lets anyone delete in team_members; a filter on team_id alone would wipe team 1
+  const r = await fetch(`${base}/rest/v1/team_members?select=*`, { headers: { apikey: 'x', Authorization: `Bearer ${(await import('./mock-supabase.js')).SERVICE_KEY}` } });
+  const rows = await r.json();
+  assert.equal(rows.filter((x) => x.team_id === 1 && x.role !== null && !String(x.role).startsWith('rlsprobe')).length, 2, JSON.stringify(rows));
+  assert.ok(has('cross-user-delete', 'team_members'), 'the real bug is still found');
+});
+
+test('takeover: USING (true) + WITH CHECK (owner) lets B reassign A\'s row — found as critical', () => {
+  const f = result.findings.find((x) => x.table === 'docs' && x.id === 'cross-user-takeover');
+  assert.ok(f && f.severity === 'critical');
+  assert.ok(!f.evidence.match(/[0-9a-f]{8}-[0-9a-f]{4}-/), 'user ids are hidden in evidence');
+});
+
+test('an update that fails for a non-RLS reason (trigger) is inconclusive, never a PASS', () => {
+  assert.ok(!result.passed.includes("audit_notes: B cannot modify A's rows"));
+  assert.ok(result.notes.some((n) => n.startsWith('audit_notes: modify test inconclusive')));
+});
+
+test('varchar(16) marker column: same-length tampering, correct policy proven', () => {
+  assert.ok(result.passed.includes("short_codes: B cannot modify A's rows"));
+  assert.equal(result.findings.filter((f) => f.table === 'short_codes').length, 0);
 });
 
 test('public bucket is info, not a cross-user leak', () => {

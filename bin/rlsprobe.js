@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { scan } from '../src/core/scan.js';
+import { scan, plan } from '../src/core/scan.js';
 import { printReport, markdownReport, grade, color } from '../src/core/report.js';
 
 const HELP = `
 rlsprobe — prove your backend's access rules actually work (Supabase, Firebase)
 
 Usage
+  npx rlsprobe                  test the project in this folder (finds the config itself)
+  npx rlsprobe setup-agent      teach Claude Code / Codex / Cursor in this project to use rlsprobe
   npx rlsprobe --site https://your-app.com --source .
   npx rlsprobe --url https://xyz.supabase.co --anon-key eyJ... --source .
   npx rlsprobe --project-id my-app --api-key AIza... --source .
@@ -46,6 +50,7 @@ Common
   --json                 Print the raw result as JSON
   --yes                  Skip the "I own this app" confirmation (for CI)
   -q, --quiet            Less output
+  -v, --version
   -h, --help
 
 What it does
@@ -80,21 +85,86 @@ const OPTIONS = {
   yes: { type: 'boolean' },
   quiet: { type: 'boolean', short: 'q' },
   help: { type: 'boolean', short: 'h' },
+  version: { type: 'boolean', short: 'v' },
 };
 
 let v;
+let positionals = [];
 try {
-  ({ values: v } = parseArgs({ options: OPTIONS }));
+  ({ values: v, positionals } = parseArgs({ options: { ...OPTIONS, force: { type: 'boolean' } }, allowPositionals: true }));
 } catch (e) {
   console.error(`${e.message}\nRun rlsprobe --help for usage.`);
   process.exit(2);
 }
 
-const target = v.site || v.url || (v['project-id'] && `Firebase project ${v['project-id']}`) || v.source;
+if (positionals[0] === 'setup-agent') {
+  const { setupAgent } = await import('../src/core/setup-agent.js');
+  for (const line of await setupAgent(process.cwd(), { force: v.force })) console.log(`  ✔ ${line}`);
+  console.log('\nYour coding agent can now run rlsprobe. Try asking it: "check my database rules with rlsprobe".');
+  process.exit(0);
+} else if (positionals.length) {
+  console.error(`Unknown command "${positionals[0]}". Run rlsprobe --help for usage.`);
+  process.exit(2);
+}
+
+if (v.version) {
+  const { readFileSync } = await import('node:fs');
+  console.log(JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
+  process.exit(0);
+}
+
+// `npx rlsprobe` inside a project folder: test that project
+if (!v.help && !v.site && !v.url && !v['project-id'] && !v.source && looksLikeProject(process.cwd())) {
+  v.source = '.';
+  console.error(color.dim(`No target given — testing the project in this folder (${process.cwd()}).`));
+}
+
+const target = v.site || v.url || (v['project-id'] && `Firebase project ${v['project-id']}`) || (v.source && `the project in ${v.source === '.' ? process.cwd() : v.source}`);
 if (v.help || !target) {
   console.log(HELP);
   process.exit(v.help ? 0 : 2);
 }
+
+function looksLikeProject(dir) {
+  return [
+    'package.json', 'supabase', 'firebase.json', 'firestore.rules', 'database.rules.json', 'pubspec.yaml',
+    'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'local.properties', '.env', '.env.local',
+  ].some((f) => existsSync(join(dir, f)));
+}
+
+const opts = {
+  site: v.site,
+  url: v.url,
+  anonKey: v['anon-key'],
+  userA: v['user-a'],
+  userB: v['user-b'],
+  emailDomain: v['email-domain'],
+  cleanupRpc: v['cleanup-rpc'],
+  source: v.source,
+  platform: v.platform,
+  projectId: v['project-id'],
+  apiKey: v['api-key'],
+  emulator: v.emulator,
+  databaseRules: v['database-rules'],
+  firestoreRules: v['firestore-rules'],
+  storageRules: v['storage-rules'],
+  tables: v.table,
+  only: v.only,
+  buckets: v.bucket,
+  quiet: v.quiet || v.json,
+};
+
+// Resolve exactly which backend projects would be touched BEFORE asking — the user (or an agent
+// running with --yes) approves the real targets, not just a folder name.
+let prepared;
+try {
+  prepared = await plan(opts, { log: opts.quiet ? () => {} : (m) => console.error(m) });
+} catch (e) {
+  console.error(color.red(`\nError: ${e.message}`));
+  process.exit(2);
+}
+const targets = prepared.targets.map((t) => t.target);
+console.error(`Target: ${targets.join(' + ')}`);
 
 if (!v.yes) {
   console.error(color.yellow('rlsprobe creates two test users and test rows/files in the target project, then removes the test data.'));
@@ -102,7 +172,7 @@ if (!v.yes) {
   // closed stdin (CI without --yes) must abort, not hang
   const a = await new Promise((resolve) => {
     rl.once('close', () => resolve(''));
-    rl.question(`Do you own (or have permission to test) ${target}? [y/N] `).then(resolve, () => resolve(''));
+    rl.question(`Do you own (or have permission to test) ${targets.join(' and ')}? [y/N] `).then(resolve, () => resolve(''));
   });
   rl.close();
   if (!/^y(es)?$/i.test(a.trim())) {
@@ -112,27 +182,7 @@ if (!v.yes) {
 }
 
 try {
-  const result = await scan({
-    site: v.site,
-    url: v.url,
-    anonKey: v['anon-key'],
-    userA: v['user-a'],
-    userB: v['user-b'],
-    emailDomain: v['email-domain'],
-    cleanupRpc: v['cleanup-rpc'],
-    source: v.source,
-    platform: v.platform,
-    projectId: v['project-id'],
-    apiKey: v['api-key'],
-    emulator: v.emulator,
-    databaseRules: v['database-rules'],
-    firestoreRules: v['firestore-rules'],
-    storageRules: v['storage-rules'],
-    tables: v.table,
-    only: v.only,
-    buckets: v.bucket,
-    quiet: v.quiet || v.json,
-  });
+  const result = await scan(opts, prepared);
   if (v.json) console.log(JSON.stringify({ grade: grade(result.findings, result.stats), ...result }, null, 2));
   else printReport(result, { wroteFile: Boolean(v.out) });
   if (v.out) {

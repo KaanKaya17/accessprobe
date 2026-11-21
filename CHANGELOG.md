@@ -6,22 +6,57 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-21
+
 ### Added
-- Firebase Realtime Database: paths are taken from the app code (`getReference()`/`.child()` chains) when there is no `database.rules.json`.
-- New test: can anyone list every entry under a node? It is critical when the entries are keyed by user id or by a secret such as a backup code.
-- `--database-rules`, `--firestore-rules` and `--storage-rules` take rules exported from the console, e.g. `firebase database:get /.settings/rules`.
-- Rules and code are combined. Code adds the keyed structure that rules often leave out, so `"duel_invites": {".write": "auth != null"}` is tested as `duel_invites/$targetUserId`.
-- RTDB `.validate` shapes (`hasChildren`, `isNumber`) are used for the test record, so schema-checked user nodes are fully tested.
-- Inboxes are detected from code that writes through a recipient id. Ids that are only read are no longer treated as inboxes.
+- **Zero-config:** `npx rlsprobe` in a project folder finds everything by itself.
+  - **Supabase:** the URL and the public anon key come from `.env*`, `local.properties`, `app.json` or client code.
+  - **Firebase:** the web config comes from `initializeApp({...})`.
+  - Secret keys are never used. A secret key in a browser-exposed variable (`VITE_`, `NEXT_PUBLIC_`, `EXPO_PUBLIC_`, …) or in client code is reported as critical.
+- **The target is named before anything is written.** The confirmation (and the `Target:` line, shown with `--yes` too) names the exact Supabase URL or Firebase project. If one folder configures several projects (`.env` vs `.env.local`, dev vs prod `google-services.json`), rlsprobe stops and asks for `--url` / `--project-id`.
+- **`rlsprobe setup-agent`** installs a Claude Code skill and an `AGENTS.md` section (Codex, Cursor and others). Coding agents then confirm ownership, report only proven findings, read every data access in the app before changing a rule, test locally and ask before deploying. It never overwrites existing files.
+- **New takeover test (Supabase and Firestore):** can user B set the owner of A's record to itself? This happens with `USING (true) … WITH CHECK (owner = me)`, or with an update rule that only checks `request.resource.data`.
+- **Firebase Realtime Database:**
+  - Paths come from the app code (`getReference()`/`.child()` chains) when there is no `database.rules.json`, and are combined with the rules when there is one.
+  - Rules exported from the console are accepted (`--database-rules`, `--firestore-rules`, `--storage-rules`).
+  - `.validate` shapes are used for the test record.
+  - Inboxes are detected from code that writes through a recipient id.
+  - New test: can anyone list every entry under a node? It is critical when the entries are keyed by user id or by a secret such as a backup code.
+- `--version`.
+- **CI:** the packed package is installed and run on Ubuntu, Windows and macOS. A release workflow publishes on `v*` tags; npm needs the `NPM_TOKEN` secret.
 
 ### Fixed
-- rlsprobe no longer writes test entries into shared nodes, where create-only rules could make them impossible to remove. This was found on the first real project.
-- Listing counts no longer include rlsprobe's own test entries.
-- Recipient-keyed nodes (invite inboxes) report overwrites as a warning with create-only advice.
-- A record read back from RTDB is compared regardless of key order. RTDB sorts keys, which used to make A's own write look failed.
-- Public-looking node names (presence, leaderboard) now lower the severity of read findings only. Another user overwriting your data is always critical.
-- If `--project-id` doesn't match the project in a config file, that file's database URL and bucket are ignored. Before, this could point rlsprobe at the wrong database.
-- New guard: if the rules you pass lock the root but the root is readable, rlsprobe is not talking to the database those rules belong to. Realtime Database results are then discarded instead of reported. Found while testing a rules fix in the emulator.
+Most of these came from the first real-project runs and from an independent code review. The first two groups are the most important.
+
+**No PASS without proof**
+- A check passes only on an explicit refusal, or on an empty answer while A still sees its own row unchanged through the same filter. A control request runs first.
+- 400, 404, network errors, trigger errors and length errors are now *inconclusive*. Before, they could be reported as passed.
+- "Saw nothing" without a test row is reported as unproven.
+
+**Never touch real data**
+- Supabase filters pin the test row with every primary-key column plus the marker. Before, composite keys produced filters like `team_id=eq.1`.
+- The client refuses to send PATCH or DELETE without a safe equality filter.
+- The marker is never placed in a key column, and tampered values keep their length.
+- RTDB test entries are only written under the test user's own key. A child is never added under a node holding a plain value, and the whole node of a real (`--user-a`) account is never overwritten.
+
+**Public data**
+- Public Supabase buckets are tested through the public URL and never reported as "B cannot download".
+- `allow read: if true` is *public by design*.
+- Content-like tables (posts, comments, products…) and leaderboard or presence nodes only lower the severity of *read* findings.
+
+**Firebase**
+- Firestore PASSes that rest only on a 403 wait until some Firestore request has succeeded. This rules out the API being off or App Check.
+- Storage is skipped, instead of crashing, when there is no bucket.
+- If `--project-id` doesn't match a config file, that file's database URL and bucket are ignored.
+- If the given rules lock the root but the root is readable, rlsprobe is talking to the wrong database, and its Realtime Database results are discarded.
+
+**Robustness**
+- Network errors are inconclusive instead of fatal.
+- Cleanup of test data always runs, in `finally`.
+- If one backend fails, the other's results and its "delete these test users" note are kept.
+- A `google-services.json` used only for push no longer triggers Firebase tests.
+- Anthropic keys are no longer also reported as OpenAI keys.
+- Text files use LF line endings (`.gitattributes`), which fixes Windows checkouts.
 - Each "passed" line and note is reported only once.
 
 ## [0.2.0] - 2026-11-21
@@ -54,6 +89,7 @@ All notable changes to this project are documented here. The format follows
 - `--cleanup-rpc` to delete test users, coverage-aware grading (`N/A` when nothing could be tested),
   and CI-friendly exit codes.
 
-[Unreleased]: https://github.com/KaanKaya17/rlsprobe/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/KaanKaya17/rlsprobe/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/KaanKaya17/rlsprobe/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/KaanKaya17/rlsprobe/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/KaanKaya17/rlsprobe/releases/tag/v0.1.0

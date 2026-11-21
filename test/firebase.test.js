@@ -33,6 +33,12 @@ before(async () => {
     body: JSON.stringify({ nickname: 'someone', stats: { total_games: 3 } }),
   });
   if (!seed.ok) throw new Error(`seeding failed: ${seed.status}`);
+  const flag = await fetch(`${emu.hosts.database}/settings/maintenance.json?ns=${emu.hosts.rtdbNamespace}`, {
+    method: 'PUT',
+    headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },
+    body: 'true',
+  });
+  if (!flag.ok) throw new Error(`seeding failed: ${flag.status}`);
   result = await scan({ platform: 'firebase', projectId: PROJECT_ID, apiKey: 'fake-api-key', source: SOURCE, emulator: true, quiet: true });
   // same emulator, but an app folder with NO rules files: paths come from Java code only
   codeOnly = await scan({ platform: 'firebase', projectId: PROJECT_ID, apiKey: 'fake-api-key', source: CODE_ONLY, emulator: true, quiet: true });
@@ -121,6 +127,19 @@ t('Realtime Database: a node keyed by backup codes that any user can list is cri
   assert.equal(f.severity, 'critical');
   assert.match(f.title, /all 1 entry under/, 'counts the real entry, not rlsprobe test data');
   assert.ok(result.passed.includes('Realtime Database /backups/$code: anonymous visitors cannot write'));
+});
+
+t('Firestore takeover: update rule that checks only the NEW owner is critical', () => {
+  const f = result.findings.find((x) => x.id === 'cross-user-takeover' && x.resource === 'claims');
+  assert.ok(f && f.severity === 'critical', JSON.stringify(on('claims').map((x) => x.id)));
+  assert.ok(result.passed.includes("notes: B cannot reassign A's documents to itself"), 'correct rules pass the takeover test');
+});
+
+test('a writable node holding a plain value is never overwritten', async (ctx) => {
+  if (skipReason) return ctx.skip(skipReason);
+  const r = await fetch(`${emu.hosts.database}/settings/maintenance.json?ns=${emu.hosts.rtdbNamespace}`, { headers: { Authorization: 'Bearer owner' } });
+  assert.equal(await r.json(), true);
+  assert.ok(result.notes.some((n) => n.includes('/settings/maintenance: anonymous write not tested')), result.notes.join('\n'));
 });
 
 test('shared nodes get no rlsprobe test entries (they might be create-only and impossible to clean up)', async (ctx) => {

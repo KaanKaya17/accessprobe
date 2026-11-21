@@ -5,7 +5,7 @@ const MAX_BUNDLES = 25;
 
 const SECRET_PATTERNS = [
   { id: 'stripe-live-secret', name: 'Stripe live secret key', re: /sk_live_[A-Za-z0-9]{20,}/g },
-  { id: 'openai-key', name: 'OpenAI API key', re: /sk-(?:proj-)?[A-Za-z0-9_-]{32,}/g },
+  { id: 'openai-key', name: 'OpenAI API key', re: /sk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{32,}/g },
   { id: 'anthropic-key', name: 'Anthropic API key', re: /sk-ant-[A-Za-z0-9_-]{32,}/g },
   { id: 'aws-access-key', name: 'AWS access key id', re: /AKIA[0-9A-Z]{16}/g },
   { id: 'github-token', name: 'GitHub token', re: /gh[pousr]_[A-Za-z0-9]{36,}/g },
