@@ -1,6 +1,6 @@
 ---
 name: accessprobe
-description: Prove that a Supabase or Firebase app's access rules actually protect user data, by running accessprobe with two real test users, then fix what it finds without breaking the app. Use when the user asks to check security, RLS, Row Level Security, Firestore/Realtime Database/Storage rules, "can users see each other's data", or before shipping an app built on Supabase or Firebase.
+description: Prove that a Supabase, Firebase or PocketBase app's access rules actually protect user data, by running accessprobe with two real test users, then fix what it finds without breaking the app. Use when the user asks to check security, RLS, Row Level Security, Firestore/Realtime Database/Storage rules, PocketBase API rules, "can users see each other's data", or before shipping an app built on Supabase, Firebase or PocketBase.
 ---
 
 # accessprobe: prove access rules work, then fix them safely
@@ -26,7 +26,7 @@ test** and pass `--url` / `--project-id`. Never pick production yourself.
 
 ## 2. Run it
 
-From the app's project folder (where `supabase/`, `firestore.rules` or `google-services.json` live):
+From the app's project folder (where `supabase/`, `firestore.rules`, `google-services.json` or `pb_migrations/` live):
 
 ```bash
 # Supabase
@@ -34,6 +34,9 @@ npx accessprobe --url https://<ref>.supabase.co --anon-key <public anon key> --s
 
 # Firebase (web or mobile; config is read from the bundle or google-services.json)
 npx accessprobe --source . --yes --json > accessprobe.json
+
+# PocketBase (collections and rules are read from pb_migrations/; never pass superuser credentials)
+npx accessprobe --url https://pb.example.com --source . --yes --json > accessprobe.json
 
 # deployed web app (also checks the JS bundle for leaked secret keys)
 npx accessprobe --site https://the-app.com --source . --yes --json > accessprobe.json
@@ -77,6 +80,8 @@ relies on breaks the app for every user. Before proposing or applying a fix:
      `firebase deploy --only database --dry-run` to validate the syntax on the server.
    - Supabase: apply the migration to a branch or local database (`supabase db reset`) and re-run
      accessprobe against it.
+   - PocketBase: run a local `pocketbase serve` with the new `pb_migrations` file and re-run accessprobe
+     against it.
 4. **Ask the user before deploying to production**, and back up the current rules or policies first.
    After deploying, re-run accessprobe and confirm the critical findings are gone and nothing new appeared.
 5. Some leaks can't be fixed by rules alone, because the app itself needs the access. Tell the user

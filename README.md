@@ -20,8 +20,8 @@ cd your-app
 npx accessprobe
 ```
 
-That's it. accessprobe finds your Supabase or Firebase config in `.env`, `local.properties`,
-`google-services.json` or your code, using only the public key an attacker would also see. Then it
+That's it. accessprobe finds your Supabase, Firebase or PocketBase config in `.env`, `local.properties`,
+`google-services.json`, `pb_migrations/` or your code, using only the public key an attacker would also see. Then it
 reads your migrations or rules and runs the tests. Add `--site https://your-app.com` to also check
 the deployed JavaScript bundle for leaked secret keys.
 
@@ -87,7 +87,22 @@ The skill tells the agent to:
 
 `allow read: if true` is reported as *public by design*, not as a leak.
 
-Test rows, documents and files are deleted at the end. Firebase test users delete themselves. Supabase
+**PocketBase**
+
+| Area | Check |
+|---|---|
+| Config | server URL from `new PocketBase("…")` in the site bundle or code, `POCKETBASE_URL` / `PB_URL` env vars, or `--url`. Collections, fields and the five API rules are read from `pb_migrations/*.js` (read, never executed) |
+| Collections | **B views / lists / modifies / takes over / deletes A's records**, **B creates a record in A's name**, anonymous view, list and create. The owner field is the relation to `users` that your rules compare with `@request.auth.id` |
+| Users | B reads, lists, changes or deletes A's account; anonymous listing of users |
+| Privilege escalation | **users make themselves admin**: when a rule trusts a field of the caller's own record (`@request.auth.role = "admin"`, `@collection.members.role = …`), A tries to set it on its own record and puts the old value back |
+
+PocketBase hides records instead of refusing: a list that doesn't match returns no items, and view,
+update and delete return 404. accessprobe only counts that as a pass when A's own read through the same
+endpoint shows the record still exists and is unchanged. A `""` (public) list or view rule is reported
+as *public by design*. Fixes are API rule strings, plus the same rules as a `pb_migrations` file.
+
+Test rows, documents, records and files are deleted at the end. Firebase and PocketBase test users
+delete themselves (where the users delete rule allows it; otherwise the report lists them). Supabase
 test users can't be deleted with the anon key, so the report tells you which ones to remove, unless
 you pass `--cleanup-rpc`.
 
@@ -140,6 +155,25 @@ Without a `database.rules.json`, Realtime Database paths are taken from your cod
 (`getReference("rooms").child(roomCode)` → `rooms/$roomCode`). An attacker can read the same paths
 out of your app, so this is a fair test. accessprobe only writes test entries under its own test user's
 key, never into shared nodes.
+
+**PocketBase:**
+
+```bash
+# server URL + your project folder (pb_migrations/ holds the collections and API rules)
+npx accessprobe --url https://pb.your-app.com --source .
+
+# the URL is also found in your code: new PocketBase("https://pb.your-app.com")
+npx accessprobe --source .
+
+# sign-up closed (users create rule is superusers-only)? create two users in the dashboard
+npx accessprobe --url https://pb.your-app.com --source . \
+  --user-a a@test.dev:pass1 --user-b b@test.dev:pass2
+```
+
+accessprobe never asks for admin / superuser credentials: it sees exactly what your app's users see.
+Test users sign up through the `users` collection and delete themselves at the end. PocketBase only
+lists collections to superusers, so without `pb_migrations` the collection names come from your code
+(`pb.collection("posts")`) or `--table`, and fields are worked out from the API's answers.
 
 **Exit codes:** `0` ok, `1` critical issue found, `2` usage error, `3` nothing could be tested.
 accessprobe never reports a clean grade for an app it couldn't test.
@@ -231,7 +265,8 @@ project. It asks you to confirm ownership before every run unless you pass `--ye
 - [ ] Edge Function checks (auth required? cross-user IDs?)
 - [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)
 - [x] Privilege escalation (users editing their own `role` / `plan`) and views that skip RLS
-- [ ] PocketBase, Appwrite: same two-user engine, one adapter each
+- [x] PocketBase: collection API rules, users and privilege escalation (tested against a real PocketBase binary)
+- [ ] Appwrite: same two-user engine, one adapter
 
 ## Contributing
 

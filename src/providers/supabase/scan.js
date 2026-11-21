@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { SupabaseClient, decodeJwt } from './client.js';
+import { looksLikePocketBase } from '../pocketbase/client.js';
 import { findProjectConfig } from './project-config.js';
 import { extract } from './discover.js';
 import { parseSchema } from './schema.js';
@@ -22,7 +23,9 @@ const projectConfig = (dir) => {
 // Is this app a Supabase app? Explicit flags, config in the site bundle, a supabase/ folder,
 // or a Supabase URL/anon key somewhere in the project (.env, local.properties, client code).
 export async function detect(opts, { site }) {
-  if (opts.url || opts.anonKey) return true;
+  if (opts.anonKey) return true;
+  // --url is shared with PocketBase: a server that answers like PocketBase is not Supabase
+  if (opts.url) return !(await looksLikePocketBase(opts.url));
   if (site && extract(site.sources).anonKeys.length) return true;
   if (opts.source) {
     if (existsSync(join(opts.source, 'supabase'))) return true;
