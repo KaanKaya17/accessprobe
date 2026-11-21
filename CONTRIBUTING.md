@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping. A few rules keep rlsprobe trustworthy.
+Thanks for helping. A few rules keep accessprobe trustworthy.
 
 ## The three rules
 
@@ -16,7 +16,7 @@ Thanks for helping. A few rules keep rlsprobe trustworthy.
 ## Setup
 
 ```bash
-git clone https://github.com/KaanKaya17/rlsprobe && cd rlsprobe
+git clone https://github.com/KaanKaya17/accessprobe && cd accessprobe
 npm test
 ```
 
@@ -25,7 +25,7 @@ npm test
 - **Supabase** tests run against a deliberately vulnerable fake Supabase in `test/mock-supabase.js`.
 - **Firebase** tests run against the real Firebase Emulator Suite (`test/firebase/`). They need Java
   11+. The first run downloads the emulator jars, which takes about a minute. Set
-  `RLSPROBE_SKIP_FIREBASE=1` to skip them.
+  `ACCESSPROBE_SKIP_FIREBASE=1` to skip them.
 
 Try the CLI against the vulnerable demo:
 
@@ -37,7 +37,7 @@ npm run demo          # terminal 2
 ## Layout
 
 ```
-bin/rlsprobe.js            CLI
+bin/accessprobe.js            CLI
 src/core/                  site fetching, orchestration, report, AI prompt
 src/providers/<platform>/  one adapter per backend: detect(), scan(), fixStyle
 test/                      unit + end-to-end tests
@@ -68,6 +68,6 @@ Branch protection and private vulnerability reporting need a public repository (
 After switching the repository to public, run:
 
 ```bash
-gh api -X POST repos/KaanKaya17/rlsprobe/rulesets --input .github/rulesets/protect-main.json
-gh api -X PUT repos/KaanKaya17/rlsprobe/private-vulnerability-reporting
+gh api -X POST repos/KaanKaya17/accessprobe/rulesets --input .github/rulesets/protect-main.json
+gh api -X PUT repos/KaanKaya17/accessprobe/private-vulnerability-reporting
 ```

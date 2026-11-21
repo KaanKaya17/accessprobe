@@ -72,7 +72,7 @@ export function dedupe(findings) {
 
 async function fetchText(url) {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'rlsprobe' } });
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'accessprobe' } });
     if (!res.ok) return null;
     return await res.text();
   } catch {

@@ -1,12 +1,12 @@
 name: Wrong result (false alarm or missed leak)
-description: rlsprobe flagged something that is fine, or passed something that is exposed.
+description: accessprobe flagged something that is fine, or passed something that is exposed.
 labels: [accuracy]
 body:
   - type: markdown
     attributes:
       value: |
         Accuracy is everything for this tool, so thank you.
-        **If real users' data is exposed and rlsprobe said PASS, report it privately instead:**
+        **If real users' data is exposed and accessprobe said PASS, report it privately instead:**
         Security → Report a vulnerability. Never paste real keys, tokens or other people's data.
   - type: dropdown
     id: kind
@@ -36,7 +36,7 @@ body:
   - type: textarea
     id: output
     attributes:
-      label: rlsprobe output
+      label: accessprobe output
       description: The finding or PASS line plus its proof line. Redact anything private.
       render: text
     validations:
@@ -44,5 +44,5 @@ body:
   - type: input
     id: version
     attributes:
-      label: rlsprobe version and command
-      placeholder: "0.2.0 — npx rlsprobe --site … --source ."
+      label: accessprobe version and command
+      placeholder: "0.2.0 — npx accessprobe --site … --source ."

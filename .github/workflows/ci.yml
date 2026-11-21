@@ -16,7 +16,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       # the Firebase Emulator Suite end-to-end test runs on Node 22 only (it takes ~1 min)
-      RLSPROBE_SKIP_FIREBASE: ${{ matrix.node != 22 && '1' || '0' }}
+      ACCESSPROBE_SKIP_FIREBASE: ${{ matrix.node != 22 && '1' || '0' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -34,7 +34,7 @@ jobs:
           key: firebase-emulators-${{ runner.os }}-15.35.0
       - run: npm test
 
-  # install the packed tarball like `npx rlsprobe` would, then use the installed binary
+  # install the packed tarball like `npx accessprobe` would, then use the installed binary
   package:
     strategy:
       fail-fast: false

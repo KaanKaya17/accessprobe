@@ -2,8 +2,8 @@ name: Release
 # Push a tag like v0.3.0 (matching package.json) to publish.
 #
 # npm: Trusted Publishing (OIDC) — no token stored anywhere. One-time setup on npmjs.com:
-#   package rlsprobe → Settings → Trusted Publisher → GitHub Actions,
-#   repository KaanKaya17/rlsprobe, workflow release.yml.
+#   package accessprobe → Settings → Trusted Publisher → GitHub Actions,
+#   repository KaanKaya17/accessprobe, workflow release.yml.
 # (The very first publish has to be done once by hand, because the package must exist first.)
 # An NPM_TOKEN secret still works as a fallback. Private repositories skip npm entirely.
 on:
@@ -41,8 +41,8 @@ jobs:
         run: |
           v=$(node -p "require('./package.json').version")
           # already on npm (e.g. the very first version, published by hand): nothing to do
-          if npm view "rlsprobe@$v" version >/dev/null 2>&1; then
-            echo "::notice::rlsprobe@$v is already on npm, skipping publish."
+          if npm view "accessprobe@$v" version >/dev/null 2>&1; then
+            echo "::notice::accessprobe@$v is already on npm, skipping publish."
             exit 0
           fi
           # Trusted Publishing needs npm >= 11.5; it also adds provenance automatically

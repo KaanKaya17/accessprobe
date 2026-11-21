@@ -77,7 +77,7 @@ export async function probeRtdb(client, src, [A, B], { log }) {
     if (rootRead === undefined || rootRead === false || rootRead === 'false') {
       findings.pop();
       skipped.push(
-        `Realtime Database: the root is readable, but the rules you gave lock it — rlsprobe is probably talking to a different database (instance / namespace: ${client.ep.databaseNs || client.ep.database}). Realtime Database results were discarded.`,
+        `Realtime Database: the root is readable, but the rules you gave lock it — accessprobe is probably talking to a different database (instance / namespace: ${client.ep.databaseNs || client.ep.database}). Realtime Database results were discarded.`,
       );
       return { findings: [], passed: [], skipped, left, fullyTested: 0, count: 0 };
     }
@@ -93,9 +93,9 @@ export async function probeRtdb(client, src, [A, B], { log }) {
   for (const t of targets) {
     log(`  rtdb ${t.path}`);
     const publicHint = PUBLIC_HINT.test(t.path.split('/')[0]);
-    const fill = (u) => t.path.replace(/\$\w+/g, (v) => (v === t.ownerVar ? u.id : `rlsprobe_${v.slice(1)}`));
-    const key = `rlsprobe_${rand()}`;
-    const marker = `rlsprobe-${rand()}`;
+    const fill = (u) => t.path.replace(/\$\w+/g, (v) => (v === t.ownerVar ? u.id : `accessprobe_${v.slice(1)}`));
+    const key = `accessprobe_${rand()}`;
+    const marker = `accessprobe-${rand()}`;
     // ".validate": "newData.hasChildren([...])" on the user's node → write a record of that shape
     // at the node itself; otherwise a plain value under a fresh child key
     const shape = t.ownerVar ? shapeFromValidate(t.validate, marker) : null;
@@ -131,8 +131,8 @@ export async function probeRtdb(client, src, [A, B], { log }) {
       ]) {
         const r = await client.rtdbGet(parent, { token, shallow: true });
         if (ok(r) && r.data && typeof r.data === 'object' && Object.keys(r.data).length) {
-          // don't count rlsprobe's own test entries as other people's data
-          const n = Object.keys(r.data).filter((k) => k !== A.id && k !== B.id && !k.startsWith('rlsprobe')).length;
+          // don't count accessprobe's own test entries as other people's data
+          const n = Object.keys(r.data).filter((k) => k !== A.id && k !== B.id && !k.startsWith('accessprobe')).length;
           const what = n ? `all ${n} entr${n === 1 ? 'y' : 'ies'}` : 'every entry (only the test entry exists yet)';
           findings.push({
             id: who === 'anonymous' ? 'rtdb-anon-list' : 'rtdb-list',
@@ -164,7 +164,7 @@ export async function probeRtdb(client, src, [A, B], { log }) {
       const probe = await client.rtdbGet(node, { token: B.token, shallow: true });
       const safe = ok(probe) && (probe.data === null || (typeof probe.data === 'object' && !Array.isArray(probe.data)));
       if (!safe) {
-        skipped.push(`Realtime Database /${t.path}: anonymous write not tested — rlsprobe could not confirm the node is safe to add a test child to`);
+        skipped.push(`Realtime Database /${t.path}: anonymous write not tested — accessprobe could not confirm the node is safe to add a test child to`);
         continue;
       }
       const an = await client.rtdbPut(anPath, marker);
@@ -285,11 +285,11 @@ export function shapeFromValidate(validate, marker) {
     else if (t === 'String' || /name|title|text|nick/i.test(k)) {
       value[k] = marker;
       markerKey ??= k;
-    } else value[k] = /time|date|at$/i.test(k) ? Date.now() : { rlsprobe: marker };
+    } else value[k] = /time|date|at$/i.test(k) ? Date.now() : { accessprobe: marker };
   }
   if (!markerKey) {
-    value.rlsprobe = marker; // extra child: only safe if the rule does not forbid unknown keys
-    markerKey = 'rlsprobe';
+    value.accessprobe = marker; // extra child: only safe if the rule does not forbid unknown keys
+    markerKey = 'accessprobe';
   }
   return { value, tampered: { ...value, [markerKey]: `${marker}-x` } };
 }
@@ -327,13 +327,13 @@ export async function probeStorage(client, src, [A, B], { log }) {
   for (const t of targets) {
     log(`  storage ${t.dir}`);
     const tf = (f) => findings.push({ resource: t.dir, ...f });
-    const dirFor = (u) => t.dir.replace(/\{(\w+)\}/g, (_, v) => (v === t.ownerVar ? u.id : `rlsprobe-${v}`));
+    const dirFor = (u) => t.dir.replace(/\{(\w+)\}/g, (_, v) => (v === t.ownerVar ? u.id : `accessprobe-${v}`));
     const aDir = dirFor(A);
-    const path = `${aDir}/rlsprobe-${rand()}.txt`;
+    const path = `${aDir}/accessprobe-${rand()}.txt`;
     const shown = path.replace(A.id, '<user A id>');
     const rules = () => fix.storageOwnerRules(t.match.path, t.ownerVar);
 
-    const up = await client.upload(path, 'rlsprobe test file — safe to delete', { token: A.token });
+    const up = await client.upload(path, 'accessprobe test file — safe to delete', { token: A.token });
     const aGet = ok(up) ? await client.download(path, { token: A.token }) : null;
     if (!ok(up) || !ok(aGet)) {
       skipped.push(`Storage ${t.dir}: user A could not upload and read back a test file (${up.status} ${short(up.data)})`);

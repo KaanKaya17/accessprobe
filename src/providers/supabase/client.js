@@ -90,7 +90,7 @@ export class SupabaseClient {
   }
 
   refused(method, table) {
-    return Promise.resolve({ ok: false, status: 0, data: { message: 'refused by rlsprobe: no safe row filter' }, headers: new Headers(), evidence: `${method} /rest/v1/${table} → not sent (no safe filter)` });
+    return Promise.resolve({ ok: false, status: 0, data: { message: 'refused by accessprobe: no safe row filter' }, headers: new Headers(), evidence: `${method} /rest/v1/${table} → not sent (no safe filter)` });
   }
 
   update(table, filter, patch, { token } = {}) {

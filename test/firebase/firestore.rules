@@ -1,5 +1,5 @@
 rules_version = '2';
-// Fake app for rlsprobe tests. Mixes deliberate real-world mistakes with correct rules.
+// Fake app for accessprobe tests. Mixes deliberate real-world mistakes with correct rules.
 service cloud.firestore {
   match /databases/{database}/documents {
 

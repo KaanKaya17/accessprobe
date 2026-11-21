@@ -1,5 +1,5 @@
 // End-to-end against the real Firebase rules engine (Emulator Suite).
-// Skipped cleanly when Java / the emulator are unavailable (RLSPROBE_SKIP_FIREBASE=1 to force).
+// Skipped cleanly when Java / the emulator are unavailable (ACCESSPROBE_SKIP_FIREBASE=1 to force).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +26,7 @@ before(async () => {
     return;
   }
   // existing app data (as in any real app): one backup written by some real user.
-  // "Bearer owner" is the emulator's admin bypass — used only by this test setup, never by rlsprobe.
+  // "Bearer owner" is the emulator's admin bypass — used only by this test setup, never by accessprobe.
   const seed = await fetch(`${emu.hosts.database}/backups/ABC123.json?ns=${emu.hosts.rtdbNamespace}`, {
     method: 'PUT',
     headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },
@@ -125,7 +125,7 @@ t('Realtime Database: a node keyed by backup codes that any user can list is cri
   const f = result.findings.find((x) => x.id === 'rtdb-list' && x.resource === 'backups');
   assert.ok(f, 'backups listing not found');
   assert.equal(f.severity, 'critical');
-  assert.match(f.title, /all 1 entry under/, 'counts the real entry, not rlsprobe test data');
+  assert.match(f.title, /all 1 entry under/, 'counts the real entry, not accessprobe test data');
   assert.ok(result.passed.includes('Realtime Database /backups/$code: anonymous visitors cannot write'));
 });
 
@@ -142,7 +142,7 @@ test('a writable node holding a plain value is never overwritten', async (ctx) =
   assert.ok(result.notes.some((n) => n.includes('/settings/maintenance: anonymous write not tested')), result.notes.join('\n'));
 });
 
-test('shared nodes get no rlsprobe test entries (they might be create-only and impossible to clean up)', async (ctx) => {
+test('shared nodes get no accessprobe test entries (they might be create-only and impossible to clean up)', async (ctx) => {
   if (skipReason) return ctx.skip(skipReason);
   const r = await fetch(`${emu.hosts.database}/backups.json?ns=${emu.hosts.rtdbNamespace}&shallow=true`, {
     headers: { Authorization: 'Bearer owner' },

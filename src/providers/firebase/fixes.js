@@ -31,7 +31,7 @@ export function ownerOnlyRules(matchPath, field, pathVar) {
     `  // on update, also stop the owner field from being changed:`,
     `  // && request.resource.data.${f} == resource.data.${f}`,
     `}`,
-    ...(field ? [] : ['// rlsprobe could not find the owner field name; replace ownerId with yours']),
+    ...(field ? [] : ['// accessprobe could not find the owner field name; replace ownerId with yours']),
   ].join('\n');
 }
 

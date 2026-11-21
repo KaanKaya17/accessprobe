@@ -21,7 +21,7 @@ export function fixCode(finding) {
 export function aiPrompt(finding, style = GENERIC, platformLabel = 'my') {
   const leaked = finding.id.startsWith('leaked-');
   const parts = [
-    `Security issue found by rlsprobe in ${platformLabel === 'my' ? 'my' : `my ${platformLabel}`} app: ${finding.title}.`,
+    `Security issue found by accessprobe in ${platformLabel === 'my' ? 'my' : `my ${platformLabel}`} app: ${finding.title}.`,
     `Proof: ${finding.evidence}`,
     leaked
       ? 'Please remove this secret from all client-side code and environment variables that are exposed to the browser.'

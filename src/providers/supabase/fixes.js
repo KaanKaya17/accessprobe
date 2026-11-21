@@ -51,7 +51,7 @@ export function noOwnerColumn(table) {
   return [
     `-- ${table}: no owner column found, so rows cannot be tied to a user.`,
     `alter table public.${q(table)} add column user_id uuid references auth.users(id) default auth.uid();`,
-    '-- then apply owner-only policies (re-run rlsprobe to get them)',
+    '-- then apply owner-only policies (re-run accessprobe to get them)',
   ].join('\n');
 }
 

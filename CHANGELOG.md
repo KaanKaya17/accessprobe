@@ -8,15 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.3.0] - 2026-11-21
 
+### Changed
+- **Renamed to accessprobe** (was rlsprobe): npm refused the old name as too similar to an existing package, and it covers Firebase rules too, not just RLS. Command: `npx accessprobe`.
+
 ### Added
-- **Supabase "Confirm email" check:** before signing up test users, rlsprobe reads the project's public auth settings. If confirmation emails would be sent, it stops and nothing is created. Bouncing emails to made-up addresses can get a project's email sending restricted.
+- **Supabase "Confirm email" check:** before signing up test users, accessprobe reads the project's public auth settings. If confirmation emails would be sent, it stops and nothing is created. Bouncing emails to made-up addresses can get a project's email sending restricted.
 - npm releases use Trusted Publishing (OIDC), so no npm token needs to be stored. Private repositories skip npm.
-- **Zero-config:** `npx rlsprobe` in a project folder finds everything by itself.
+- **Zero-config:** `npx accessprobe` in a project folder finds everything by itself.
   - **Supabase:** the URL and the public anon key come from `.env*`, `local.properties`, `app.json` or client code.
   - **Firebase:** the web config comes from `initializeApp({...})`.
   - Secret keys are never used. A secret key in a browser-exposed variable (`VITE_`, `NEXT_PUBLIC_`, `EXPO_PUBLIC_`, …) or in client code is reported as critical.
-- **The target is named before anything is written.** The confirmation (and the `Target:` line, shown with `--yes` too) names the exact Supabase URL or Firebase project. If one folder configures several projects (`.env` vs `.env.local`, dev vs prod `google-services.json`), rlsprobe stops and asks for `--url` / `--project-id`.
-- **`rlsprobe setup-agent`** installs a Claude Code skill and an `AGENTS.md` section (Codex, Cursor and others). Coding agents then confirm ownership, report only proven findings, read every data access in the app before changing a rule, test locally and ask before deploying. It never overwrites existing files.
+- **The target is named before anything is written.** The confirmation (and the `Target:` line, shown with `--yes` too) names the exact Supabase URL or Firebase project. If one folder configures several projects (`.env` vs `.env.local`, dev vs prod `google-services.json`), accessprobe stops and asks for `--url` / `--project-id`.
+- **`accessprobe setup-agent`** installs a Claude Code skill and an `AGENTS.md` section (Codex, Cursor and others). Coding agents then confirm ownership, report only proven findings, read every data access in the app before changing a rule, test locally and ask before deploying. It never overwrites existing files.
 - **New takeover test (Supabase and Firestore):** can user B set the owner of A's record to itself? This happens with `USING (true) … WITH CHECK (owner = me)`, or with an update rule that only checks `request.resource.data`.
 - **Firebase Realtime Database:**
   - Paths come from the app code (`getReference()`/`.child()` chains) when there is no `database.rules.json`, and are combined with the rules when there is one.
@@ -50,7 +53,7 @@ Most of these came from the first real-project runs and from an independent code
 - Firestore PASSes that rest only on a 403 wait until some Firestore request has succeeded. This rules out the API being off or App Check.
 - Storage is skipped, instead of crashing, when there is no bucket.
 - If `--project-id` doesn't match a config file, that file's database URL and bucket are ignored.
-- If the given rules lock the root but the root is readable, rlsprobe is talking to the wrong database, and its Realtime Database results are discarded.
+- If the given rules lock the root but the root is readable, accessprobe is talking to the wrong database, and its Realtime Database results are discarded.
 
 **Robustness**
 - Network errors are inconclusive instead of fatal.
@@ -91,7 +94,7 @@ Most of these came from the first real-project runs and from an independent code
 - `--cleanup-rpc` to delete test users, coverage-aware grading (`N/A` when nothing could be tested),
   and CI-friendly exit codes.
 
-[Unreleased]: https://github.com/KaanKaya17/rlsprobe/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/KaanKaya17/rlsprobe/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/KaanKaya17/rlsprobe/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/KaanKaya17/rlsprobe/releases/tag/v0.1.0
+[Unreleased]: https://github.com/KaanKaya17/accessprobe/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/KaanKaya17/accessprobe/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/KaanKaya17/accessprobe/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/KaanKaya17/accessprobe/releases/tag/v0.1.0

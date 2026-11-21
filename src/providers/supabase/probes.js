@@ -11,8 +11,8 @@ const rand = () => Math.random().toString(36).slice(2, 8);
 export async function setupUsers(client, { userA, userB, emailDomain = 'example.com', log }) {
   const run = rand();
   const specs = [
-    { label: 'A', cred: userA, email: `rlsprobe-${run}-a@${emailDomain}` },
-    { label: 'B', cred: userB, email: `rlsprobe-${run}-b@${emailDomain}` },
+    { label: 'A', cred: userA, email: `accessprobe-${run}-a@${emailDomain}` },
+    { label: 'B', cred: userB, email: `accessprobe-${run}-b@${emailDomain}` },
   ];
   const users = [];
   const madeSoFar = [];
@@ -155,7 +155,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
     let anonTried = false;
     let anonBlocked = false;
     if (!t.isView && !t.nameOnly) {
-      const built = buildRow(t, { ownerId: aVal, marker: `rlsprobe-anon-${rand()}` });
+      const built = buildRow(t, { ownerId: aVal, marker: `accessprobe-anon-${rand()}` });
       if (built && (built.markerCol || (t.pkCols || []).length)) {
         anonTried = true;
         const r = await insertWithRetry(client, t, built.row, undefined);
@@ -220,7 +220,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
       if (anonNoAccess && anonCanInsert) passed.push(`${t.name}: anonymous visitors can't read`);
       else if (anonNoAccess) passed.push(`${t.name}: anonymous visitors have no access (privileges revoked)`);
       else if (anonBlocked) passed.push(`${t.name}: anonymous visitors can't insert`);
-      else if (!anonTried && !t.nameOnly && !t.isView) skipped.push(`${t.name}: anonymous insert not tested (required columns rlsprobe cannot fill)`);
+      else if (!anonTried && !t.nameOnly && !t.isView) skipped.push(`${t.name}: anonymous insert not tested (required columns accessprobe cannot fill)`);
     }
 
     // RLS is off: every user test would just repeat the same root cause
@@ -246,10 +246,10 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
     }
 
     // 3) user A creates a row of their own
-    const marker = `rlsprobe-${rand()}`;
+    const marker = `accessprobe-${rand()}`;
     const built = buildRow(t, { ownerId: aVal, marker });
     let mine = null;
-    let insertErr = built ? null : 'required columns that rlsprobe cannot fill (foreign keys)';
+    let insertErr = built ? null : 'required columns that accessprobe cannot fill (foreign keys)';
     let denied = false;
     if (built && !built.markerCol && !(t.pkCols || []).length) {
       insertErr = 'no primary key and no text column, so a test row could not be targeted safely';
@@ -283,7 +283,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
               id: 'cross-user-read-existing',
               severity: 'warning',
               title: `Logged-in user B can read ${n} row(s) of OTHER users in "${t.name}"`,
-              detail: `B owns nothing here but sees rows where ${t.owner.name} ≠ B. Not proven with test data (rlsprobe could not create a test row), so check whether this table is meant to be shared. Typical cause: using (auth.role() = 'authenticated') or using (true).`,
+              detail: `B owns nothing here but sees rows where ${t.owner.name} ≠ B. Not proven with test data (accessprobe could not create a test row), so check whether this table is meant to be shared. Typical cause: using (auth.role() = 'authenticated') or using (true).`,
               evidence: `as user B: ${r.evidence} — ${n} foreign rows visible`,
               fix: { sql: pol() },
             });
@@ -408,7 +408,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
     // 6) B inserts a row pretending to be A
     if (t.owner) {
       // same values A used successfully, so only a policy can make this fail
-      const fakeMarker = `rlsprobe-${rand()}`;
+      const fakeMarker = `accessprobe-${rand()}`;
       const row = { ...mine.sent };
       if (mine.markerCol) row[mine.markerCol] = fakeMarker;
       const r = await client.insert(t.name, row, { token: B.token });
@@ -500,8 +500,8 @@ export async function probeStorage(client, [A, B], { extraBuckets = [], log }) {
       });
     }
 
-    const path = `${A.id}/rlsprobe-${rand()}.txt`;
-    const up = await client.upload(bucket, path, 'rlsprobe test file — safe to delete', { token: A.token });
+    const path = `${A.id}/accessprobe-${rand()}.txt`;
+    const up = await client.upload(bucket, path, 'accessprobe test file — safe to delete', { token: A.token });
     if (!up.ok) {
       skipped.push(`${bucket}: cross-user file tests skipped — user A cannot upload to "<user id>/…"`);
       continue;
@@ -575,7 +575,7 @@ export function rpcReview(schema) {
       severity: 'info',
       title: `${schema.rpcs.length} database function(s) are callable over the API`,
       detail:
-        'rlsprobe does not call them (they may have side effects). SECURITY DEFINER functions skip RLS — make sure each one checks auth.uid() itself, or revoke execute from anon.',
+        'accessprobe does not call them (they may have side effects). SECURITY DEFINER functions skip RLS — make sure each one checks auth.uid() itself, or revoke execute from anon.',
       evidence: schema.rpcs.map((r) => `POST /rest/v1/rpc/${r}`).join(', '),
       fix: {
         sql: schema.rpcs.map((r) => `-- if "${r}" should not be public:\nrevoke execute on function public.${r} from anon;`).join('\n'),
