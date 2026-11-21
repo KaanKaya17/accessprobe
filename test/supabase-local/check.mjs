@@ -26,7 +26,9 @@ expect(passed("notes: B cannot read A's rows"), "notes: B's read is refused (pas
 expect(none('subscriptions'), 'subscriptions: no findings');
 expect(passed('subscriptions: users cannot change their own plan'), 'subscriptions: column grant blocks the plan change (passed)');
 
-expect(has('notes_feed', 'view-bypass'), 'notes_feed: view without security_invoker leaks A\'s private row to B');
+const feed = r.findings.filter((f) => f.table === 'notes_feed');
+expect(feed.some((f) => f.severity === 'critical'), 'notes_feed: view without security_invoker is caught (it skips RLS)');
+expect(feed.length > 0 && feed.every((f) => !f.fix || /security_invoker = true/.test(f.fix.sql)), 'notes_feed: every fix is the view fix, never table policies');
 expect(none('my_notes'), 'my_notes: security_invoker view, no findings');
 expect(passed("my_notes: B cannot read A's private rows through it"), 'my_notes: B sees nothing through it (passed)');
 

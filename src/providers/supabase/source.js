@@ -53,7 +53,7 @@ export function sourceToDefinitions(src) {
       properties[col] = { format: c.format, ...(description && { description }), ...(c.hasDefault && { default: 'db' }) };
       if (c.notNull && !c.hasDefault) required.push(col);
     }
-    definitions[name] = { properties, required, 'x-name-only': Boolean(t.nameOnly) };
+    definitions[name] = { properties, required, 'x-name-only': Boolean(t.nameOnly), 'x-view': Boolean(t.isView) };
     paths[`/${name}`] = t.isView ? { get: {} } : { get: {}, post: {}, patch: {}, delete: {} };
   }
   for (const r of src.rpcs) paths[`/rpc/${r}`] = { post: {} };

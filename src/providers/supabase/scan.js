@@ -178,6 +178,7 @@ async function loadSchema(client, token, notes, sourceDir, log) {
     const s = parseSchema(r.data);
     for (const t of s.tables) {
       const prev = merged.tables.get(t.name);
+      if (prev?.sourceView) t.sourceView = true; // the migrations know it is a view; the API may not
       if (!prev || prev.nameOnly || t.columns.length > prev.columns.length) merged.tables.set(t.name, t); // live API wins
     }
     s.rpcs.forEach((x) => merged.rpcs.add(x));

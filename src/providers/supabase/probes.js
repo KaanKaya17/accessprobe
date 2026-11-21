@@ -137,7 +137,21 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
 
   for (const t of schema.tables) {
     log(`  table ${t.name}`);
-    const tf = (f) => findings.push({ table: t.name, ...f });
+    // A view runs as its owner and skips RLS. Postgres makes simple views writable too, so the
+    // normal tests run through it; every finding gets the view fix instead of table policies.
+    const knownView = t.isView || t.sourceView;
+    if (knownView) viewRelations.push(t);
+    const tf = (f) =>
+      findings.push(
+        knownView && f.fix?.sql
+          ? {
+              table: t.name,
+              ...f,
+              detail: `${f.detail} "${t.name}" is a view: it runs with its owner's rights and skips Row Level Security unless it has security_invoker = true.`,
+              fix: { sql: viewInvoker(t.name) },
+            }
+          : { table: t.name, ...f },
+      );
     const me = meExpr(t, schema);
     const pol = (ops) =>
       me === null ? ownerPolicies(t.name, t.identity.authCol, ops) : ownerPolicies(t.name, t.owner.name, ops, me);
@@ -231,13 +245,10 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
     // RLS is off: every user test would just repeat the same root cause
     if (anonWrite) continue;
 
-    if (t.isView) {
-      viewRelations.push(t);
-      continue;
-    }
+    if (t.isView) continue; // read-only view: checked with A's rows after all tables
 
     if (t.nameOnly) {
-      viewRelations.push(t);
+      if (!knownView) viewRelations.push(t);
       await freshUserCheck(client, t, B, { tf, passed, skipped, anonCount });
       skipped.push(`${t.name}: write tests skipped — columns unknown (found in code or --table, not in migrations)`);
       continue;

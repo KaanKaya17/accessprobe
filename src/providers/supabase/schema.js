@@ -51,6 +51,8 @@ export function parseSchema(openapi) {
       writable: Boolean(p.post || p.patch || p.delete),
       isView: !p.post && !p.patch && !p.delete,
       nameOnly: Boolean(def['x-name-only']),
+      // known to be a view from the migrations (simple views are auto-updatable, so the API alone can't tell)
+      sourceView: Boolean(def['x-view']),
     });
   }
   const rpcs = Object.keys(paths)
