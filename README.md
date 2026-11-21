@@ -144,6 +144,50 @@ key, never into shared nodes.
 **Exit codes:** `0` ok, `1` critical issue found, `2` usage error, `3` nothing could be tested.
 accessprobe never reports a clean grade for an app it couldn't test.
 
+## Run it on every pull request (GitHub Action)
+
+Test your rules in CI against a **local** backend started from your repository, so every policy or rules change is attacked before it ships. Production is never touched.
+
+**Supabase** (your `supabase/migrations` running in a local Supabase):
+
+```yaml
+# .github/workflows/accessprobe.yml
+name: accessprobe
+on: pull_request
+jobs:
+  rls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: supabase/setup-cli@v1
+      - run: |
+          supabase start
+          eval "$(supabase status -o env)"
+          echo "SB_URL=$API_URL" >> "$GITHUB_ENV"
+          echo "SB_ANON=${ANON_KEY:-$PUBLISHABLE_KEY}" >> "$GITHUB_ENV"
+      - uses: KaanKaya17/accessprobe@v0.5.0
+        with:
+          args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source .
+```
+
+**Firebase** (your rules files in the Emulator Suite):
+
+```yaml
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - run: npx firebase-tools emulators:start --only auth,firestore,database,storage --project demo-ci &
+      - run: npx wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099
+      - uses: KaanKaya17/accessprobe@v0.5.0
+        with:
+          args: --project-id demo-ci --api-key fake --source . --emulator
+```
+
+The step fails when a critical leak is **proven** (`fail-on: never` only warns), and the report with fix SQL or rules goes into the job summary. Inputs: `args`, `working-directory`, `report`, `fail-on`, `summary`. Outputs: `exit-code`, `report`. On public repositories the job summary is public too; set `summary: false` if that matters.
+
+accessprobe tests itself this way: [`supabase-e2e.yml`](.github/workflows/supabase-e2e.yml) runs it against real Postgres, PostgREST and GoTrue, and against the Firebase emulators, on every pull request.
+
 ## Tested on real apps
 
 - **Supabase:** a production Android fitness app with 8 tables, `bigint` user ids mapped through
@@ -181,7 +225,8 @@ project. It asks you to confirm ownership before every run unless you pass `--ye
 
 - [x] Claude Code skill + `AGENTS.md` for Codex / Cursor (`accessprobe setup-agent`)
 - [x] Zero-config runs (`npx accessprobe` in a project folder)
-- [ ] GitHub Action + turn findings into permanent pgTAP regression tests
+- [x] GitHub Action: attack your rules on every pull request (local Supabase / Firebase emulators)
+- [ ] Turn findings into permanent pgTAP regression tests
 - [ ] MCP server: agents run it after every schema change
 - [ ] Edge Function checks (auth required? cross-user IDs?)
 - [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)
