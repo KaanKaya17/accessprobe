@@ -62,6 +62,15 @@ An adapter is done when:
 - Keep PRs focused. Update `CHANGELOG.md` under "Unreleased".
 - Never commit real keys, tokens or report files from real projects. `*-report.md` is git-ignored.
 
+## Maintainers: releasing
+
+1. Bump `version` in `package.json` and add a `## [x.y.z]` section to `CHANGELOG.md`.
+2. Merge to `main`, then tag: `git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`.
+3. The release workflow runs the tests and the package smoke test, **stages** the version on npm
+   (trusted publishing, no token), and creates the GitHub release.
+4. Approve the staged version with 2FA: npmjs.com → accessprobe → Staged Packages, or
+   `npm stage approve <id>`. Nothing is live until then.
+
 ## Maintainers: going public
 
 Branch protection and private vulnerability reporting need a public repository (or GitHub Pro).
