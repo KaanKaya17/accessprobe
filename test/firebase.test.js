@@ -10,6 +10,8 @@ import { grade, markdownReport } from '../src/core/report.js';
 const SOURCE = fileURLToPath(new URL('./firebase/', import.meta.url));
 let emu = null;
 let result = null;
+let codeOnly = null;
+const CODE_ONLY = fileURLToPath(new URL('./firebase-app-code/', import.meta.url));
 let skipReason = available() ? null : 'Java/npx not available';
 
 before(async () => {
@@ -21,6 +23,8 @@ before(async () => {
     return;
   }
   result = await scan({ platform: 'firebase', projectId: PROJECT_ID, apiKey: 'fake-api-key', source: SOURCE, emulator: true, quiet: true });
+  // same emulator, but an app folder with NO rules files: paths come from Java code only
+  codeOnly = await scan({ platform: 'firebase', projectId: PROJECT_ID, apiKey: 'fake-api-key', source: CODE_ONLY, emulator: true, quiet: true });
 }, { timeout: 300000 });
 
 after(async () => {
@@ -85,6 +89,20 @@ t('Storage: avatars leak (download + list), private folder passes', () => {
   assert.ok(has('storage-cross-user-list', 'avatars/{uid}'), 'list must use delimiter=/ like the SDK');
   assert.deepEqual(on('private/{uid}'), []);
   assert.ok(result.passed.includes('Storage private/{uid}: B cannot download A\'s files'));
+});
+
+t('Realtime Database: a node keyed by backup codes that any user can list is critical', () => {
+  const f = result.findings.find((x) => x.id === 'rtdb-list' && x.resource === 'backups');
+  assert.ok(f, 'backups listing not found');
+  assert.equal(f.severity, 'critical');
+  assert.ok(result.passed.includes('Realtime Database /backups/$code: anonymous visitors cannot write'));
+});
+
+t('no rules files: RTDB paths are taken from app code and tested for real', () => {
+  assert.ok(codeOnly.notes.some((n) => /2 path\(s\) were taken from the app code/.test(n)), codeOnly.notes.join('\n'));
+  assert.ok(codeOnly.findings.some((f) => f.id === 'rtdb-cross-user-read' && f.resource === 'users/$uid'));
+  assert.ok(codeOnly.findings.some((f) => f.id === 'rtdb-list' && f.resource === 'backups' && f.severity === 'critical'));
+  assert.ok(!codeOnly.notes.some((n) => /Could not delete/.test(n)), codeOnly.notes.join('\n'));
 });
 
 t('no test data or users are left behind; report renders rules fixes', () => {

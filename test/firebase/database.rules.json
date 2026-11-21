@@ -11,6 +11,12 @@
     "open": {
       ".read": true,
       ".write": true
+    },
+    "backups": {
+      ".read": "auth != null",
+      "$code": {
+        ".write": "auth != null"
+      }
     }
   }
 }

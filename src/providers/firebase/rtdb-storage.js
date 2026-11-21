@@ -2,12 +2,18 @@
 // A proves its own write+read first; only explicit refusals count as PASS).
 
 import { parseRules, ownerPathVar } from './rules.js';
+import { ownerVarOf } from './rtdb-code.js';
 import * as fix from './fixes.js';
 
 const rand = () => Math.random().toString(36).slice(2, 8);
 const ok = (r) => r && r.ok;
 const deniedRtdb = (r) => r && r.status === 401 && /Permission denied/i.test(JSON.stringify(r.data ?? ''));
 const deniedStorage = (r) => r && r.status === 403 && /No \w+ permission|Permission denied/i.test(JSON.stringify(r.data ?? ''));
+// node names that usually hold intentionally shared data
+const PUBLIC_HINT = /leaderboard|ranking|scores?|highscores?|public|presence|online|status|lobby/i;
+// record keys that act like passwords when the key itself is the secret
+const SECRET_KEY = /code|token|secret|pin|backup|invite|key/i;
+const STRONG_SECRET = /backup|secret|token|\bpin|password|recovery/i;
 const short = (d) => (typeof d === 'string' ? d : JSON.stringify(d ?? '')).trim().slice(0, 120);
 
 // ---------------------------------------------------------------- RTDB
@@ -59,23 +65,70 @@ export async function probeRtdb(client, src, [A, B], { log }) {
     });
   } else if (deniedRtdb(root)) passed.push('Realtime Database: anonymous visitors cannot read the root');
 
-  const targets = src.databaseRules ? rtdbTargets(src.databaseRules) : [];
-  if (!src.databaseRules) skipped.push('Realtime Database: no database.rules.json found, only the root was tested');
+  let targets = src.databaseRules ? rtdbTargets(src.databaseRules) : [];
+  if (!src.databaseRules) {
+    // no rules file: test the paths the app itself uses (an attacker can read them from the app too)
+    targets = (src.rtdbCodePaths || []).map((path) => ({ path, ownerVar: ownerVarOf(path), fromCode: true }));
+    if (targets.length) skipped.push(`Realtime Database: no database.rules.json, so ${targets.length} path(s) were taken from the app code`);
+    else skipped.push('Realtime Database: no database.rules.json and no paths found in code — only the root was tested');
+  }
 
   for (const t of targets) {
     log(`  rtdb ${t.path}`);
+    const publicHint = PUBLIC_HINT.test(t.path.split('/')[0]);
     const fill = (u) => t.path.replace(/\$\w+/g, (v) => (v === t.ownerVar ? u.id : `rlsprobe_${v.slice(1)}`));
     const key = `rlsprobe_${rand()}`;
     const marker = `rlsprobe-${rand()}`;
     const aPath = `${fill(A)}/${key}`;
     const tf = (f) => findings.push({ resource: t.path, ...f });
+    const ownerRules = () => fix.rtdbOwnerRules(t.path.split('/$')[0]);
 
+    // 1) A writes its own entry and reads it back — nothing B does counts without this
+    const aw = await client.rtdbPut(aPath, marker, { token: A.token });
+    const ar = ok(aw) ? await client.rtdbGet(aPath, { token: A.token }) : null;
+    const aOk = ok(aw) && ok(ar) && ar.data === marker;
+    if (aOk) fullyTested++;
+
+    // 2) can someone enumerate every record under this node? (keys only, never values)
+    if (t.path.includes('/$')) {
+      const parent = t.path.slice(0, t.path.indexOf('/$'));
+      const keyVar = t.path.split('/').find((s) => s.startsWith('$'));
+      // listing user-keyed nodes or nodes keyed by a secret (backup code, token, pin) is critical
+      const sensitive = Boolean(t.ownerVar) || STRONG_SECRET.test(`${parent} ${keyVar}`);
+      for (const [who, token] of [
+        ['anonymous', undefined],
+        ['as user B', B.token],
+      ]) {
+        const r = await client.rtdbGet(parent, { token, shallow: true });
+        if (ok(r) && r.data && typeof r.data === 'object' && Object.keys(r.data).length) {
+          const n = Object.keys(r.data).length;
+          findings.push({
+            id: who === 'anonymous' ? 'rtdb-anon-list' : 'rtdb-list',
+            resource: parent,
+            severity: publicHint ? 'warning' : sensitive ? 'critical' : 'warning',
+            title: `${who === 'anonymous' ? 'Anyone (not logged in)' : 'Any signed-in user'} can list all ${n} entries under "/${parent}"`,
+            detail: SECRET_KEY.test(keyVar)
+              ? `Entries are keyed by ${keyVar} — if that is meant to be secret (a backup or invite code), listing the node hands out every code.`
+              : t.ownerVar
+                ? "Entries are keyed by user id: listing reveals every user's id."
+                : publicHint
+                  ? 'Looks like public data (leaderboard / presence). Fine if intended.'
+                  : 'Anyone can enumerate every record here. Fine only if this data is meant to be public.',
+            evidence: `${who}: ${r.evidence} → ${n} keys`,
+            fix: { code: ownerRules() },
+          });
+          break; // anonymous already implies signed-in
+        } else if (deniedRtdb(r) && who === 'as user B') passed.push(`Realtime Database /${parent}: signed-in users cannot list all entries`);
+        else if (!deniedRtdb(r) && who === 'as user B' && !aOk) skipped.push(`Realtime Database /${parent}: list test inconclusive (${r.status}, no test entry)`);
+      }
+    }
+
+    // 3) shared / fixed nodes: can a stranger write here?
     if (!t.ownerVar) {
-      // a fixed node: can a stranger write here?
-      const an = await client.rtdbPut(aPath, marker);
+      const anPath = `${fill(A)}/${key}_anon`;
+      const an = await client.rtdbPut(anPath, marker);
       if (ok(an)) {
-        const back = await client.rtdbDelete(aPath);
-        if (!ok(back)) left.push(aPath);
+        if (!ok(await client.rtdbDelete(anPath))) left.push(anPath);
         tf({
           id: 'rtdb-anon-write',
           severity: 'critical',
@@ -85,55 +138,55 @@ export async function probeRtdb(client, src, [A, B], { log }) {
           fix: { code: fix.rtdbLockNode(t.path) },
         });
       } else if (deniedRtdb(an)) passed.push(`Realtime Database /${t.path}: anonymous visitors cannot write`);
-      continue;
     }
 
-    const aw = await client.rtdbPut(aPath, marker, { token: A.token });
-    const ar = ok(aw) ? await client.rtdbGet(aPath, { token: A.token }) : null;
-    if (!ok(aw) || !ok(ar) || ar.data !== marker) {
-      skipped.push(`Realtime Database /${t.path}: user A could not write and read back its own node (${aw.status} ${short(aw.data)})`);
-      continue;
+    // 4) user-keyed nodes: B and anonymous against A's entry
+    if (t.ownerVar) {
+      if (!aOk) {
+        skipped.push(`Realtime Database /${t.path}: user A could not write and read back its own node (${aw.status} ${short(aw.data)})`);
+        continue;
+      }
+      const br = await client.rtdbGet(aPath, { token: B.token });
+      if (ok(br) && br.data === marker) {
+        tf({
+          id: 'rtdb-cross-user-read',
+          severity: publicHint ? 'warning' : 'critical',
+          title: `User B can read user A's data at "/${t.path}" in the Realtime Database`,
+          detail: publicHint
+            ? `Proven: B read an entry A wrote under its own ${t.ownerVar}. The node name suggests public data (leaderboard / presence) — fine if intended.`
+            : `Proven: A wrote under its own ${t.ownerVar}, B read it back. Typical cause: ".read": "auth != null".`,
+          evidence: `as user B: ${br.evidence}`,
+          fix: { code: ownerRules() },
+        });
+      } else if (deniedRtdb(br)) passed.push(`Realtime Database /${t.path}: B cannot read A's data`);
+      else skipped.push(`Realtime Database /${t.path}: read test inconclusive (${br.status})`);
+
+      const bw = await client.rtdbPut(aPath, `${marker}-x`, { token: B.token });
+      if (ok(bw)) {
+        tf({
+          id: 'rtdb-cross-user-write',
+          severity: 'critical',
+          title: `User B can overwrite user A's data at "/${t.path}" in the Realtime Database`,
+          detail: 'Proven: B overwrote a value A wrote.',
+          evidence: `as user B: ${bw.evidence}`,
+          fix: { code: ownerRules() },
+        });
+      } else if (deniedRtdb(bw)) passed.push(`Realtime Database /${t.path}: B cannot write to A's data`);
+
+      const an = await client.rtdbGet(aPath);
+      if (ok(an) && an.data !== null) {
+        tf({
+          id: 'rtdb-anon-read',
+          severity: publicHint ? 'warning' : 'critical',
+          title: `Anyone (not logged in) can read user data at "/${t.path}"`,
+          detail: "Proven: an unauthenticated request read A's value.",
+          evidence: `anonymous: ${an.evidence}`,
+          fix: { code: ownerRules() },
+        });
+      } else if (deniedRtdb(an)) passed.push(`Realtime Database /${t.path}: anonymous visitors cannot read`);
     }
-    fullyTested++;
 
-    const br = await client.rtdbGet(aPath, { token: B.token });
-    if (ok(br) && br.data === marker) {
-      tf({
-        id: 'rtdb-cross-user-read',
-        severity: 'critical',
-        title: `User B can read user A's data at "/${t.path}" in the Realtime Database`,
-        detail: `Proven: A wrote under its own ${t.ownerVar}, B read it back. Typical cause: ".read": "auth != null".`,
-        evidence: `as user B: ${br.evidence}`,
-        fix: { code: fix.rtdbOwnerRules(t.path.split('/$')[0]) },
-      });
-    } else if (deniedRtdb(br)) passed.push(`Realtime Database /${t.path}: B cannot read A's data`);
-    else skipped.push(`Realtime Database /${t.path}: read test inconclusive (${br.status})`);
-
-    const bw = await client.rtdbPut(aPath, `${marker}-x`, { token: B.token });
-    if (ok(bw)) {
-      tf({
-        id: 'rtdb-cross-user-write',
-        severity: 'critical',
-        title: `User B can overwrite user A's data at "/${t.path}" in the Realtime Database`,
-        detail: 'Proven: B overwrote a value A wrote.',
-        evidence: `as user B: ${bw.evidence}`,
-        fix: { code: fix.rtdbOwnerRules(t.path.split('/$')[0]) },
-      });
-    } else if (deniedRtdb(bw)) passed.push(`Realtime Database /${t.path}: B cannot write to A's data`);
-
-    const an = await client.rtdbGet(aPath);
-    if (ok(an) && an.data !== null) {
-      tf({
-        id: 'rtdb-anon-read',
-        severity: 'critical',
-        title: `Anyone (not logged in) can read user data at "/${t.path}"`,
-        detail: 'Proven: an unauthenticated request read A\'s value.',
-        evidence: `anonymous: ${an.evidence}`,
-        fix: { code: fix.rtdbOwnerRules(t.path.split('/$')[0]) },
-      });
-    } else if (deniedRtdb(an)) passed.push(`Realtime Database /${t.path}: anonymous visitors cannot read`);
-
-    if (!ok(await client.rtdbDelete(aPath, { token: A.token }))) left.push(aPath);
+    if (ok(aw) && !ok(await client.rtdbDelete(aPath, { token: A.token }))) left.push(aPath);
   }
   return { findings, passed, skipped, left, fullyTested, count: targets.length };
 }
