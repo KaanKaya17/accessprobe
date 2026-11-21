@@ -186,7 +186,7 @@ jobs:
 
 The step fails when a critical leak is **proven** (`fail-on: never` only warns), and the report with fix SQL or rules goes into the job summary. Inputs: `args`, `working-directory`, `report`, `fail-on`, `summary`. Outputs: `exit-code`, `report`. On public repositories the job summary is public too; set `summary: false` if that matters.
 
-accessprobe tests itself this way: [`supabase-e2e.yml`](.github/workflows/supabase-e2e.yml) runs it against real Postgres, PostgREST and GoTrue, and against the Firebase emulators, on every pull request.
+accessprobe tests itself this way: [`e2e.yml`](.github/workflows/e2e.yml) runs it against real Postgres, PostgREST and GoTrue, and against the Firebase emulators, on every pull request.
 
 ## Tested on real apps
 
