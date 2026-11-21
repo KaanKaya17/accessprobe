@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `rlsprobe setup-agent` installs a Claude Code skill and an `AGENTS.md` section (for Codex, Cursor and others), so coding agents run rlsprobe safely: they confirm ownership, report only proven findings, read the app's data access before changing a rule, test locally and ask before deploying. It never overwrites existing files.
 - Firebase Realtime Database: paths are taken from the app code (`getReference()`/`.child()` chains) when there is no `database.rules.json`.
 - New test: can anyone list every entry under a node? It is critical when the entries are keyed by user id or by a secret such as a backup code.
 - `--database-rules`, `--firestore-rules` and `--storage-rules` take rules exported from the console, e.g. `firebase database:get /.settings/rules`.

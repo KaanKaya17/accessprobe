@@ -9,6 +9,7 @@ const HELP = `
 rlsprobe — prove your backend's access rules actually work (Supabase, Firebase)
 
 Usage
+  npx rlsprobe setup-agent      teach Claude Code / Codex / Cursor in this project to use rlsprobe
   npx rlsprobe --site https://your-app.com --source .
   npx rlsprobe --url https://xyz.supabase.co --anon-key eyJ... --source .
   npx rlsprobe --project-id my-app --api-key AIza... --source .
@@ -83,10 +84,21 @@ const OPTIONS = {
 };
 
 let v;
+let positionals = [];
 try {
-  ({ values: v } = parseArgs({ options: OPTIONS }));
+  ({ values: v, positionals } = parseArgs({ options: { ...OPTIONS, force: { type: 'boolean' } }, allowPositionals: true }));
 } catch (e) {
   console.error(`${e.message}\nRun rlsprobe --help for usage.`);
+  process.exit(2);
+}
+
+if (positionals[0] === 'setup-agent') {
+  const { setupAgent } = await import('../src/core/setup-agent.js');
+  for (const line of await setupAgent(process.cwd(), { force: v.force })) console.log(`  ✔ ${line}`);
+  console.log('\nYour coding agent can now run rlsprobe. Try asking it: "check my database rules with rlsprobe".');
+  process.exit(0);
+} else if (positionals.length) {
+  console.error(`Unknown command "${positionals[0]}". Run rlsprobe --help for usage.`);
   process.exit(2);
 }
 

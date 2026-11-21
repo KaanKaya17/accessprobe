@@ -36,6 +36,26 @@ npx rlsprobe --site https://your-app.lovable.app
 - **Local and open source.** It runs on your machine and needs only the public keys an attacker can also see. Nothing is sent anywhere else.
 - **Zero dependencies.** Node 20+ is all you need.
 
+## Using it with Claude Code, Codex or Cursor
+
+Run this once in your project:
+
+```bash
+npx rlsprobe setup-agent
+```
+
+It adds a Claude Code skill (`.claude/skills/rlsprobe/SKILL.md`) and a short section to `AGENTS.md`,
+which Codex, Cursor and other agents read. Then just ask your agent: *"check my database rules with
+rlsprobe"*.
+
+The skill tells the agent to:
+
+- confirm you own the app before testing;
+- report only proven findings and say clearly what wasn't tested;
+- before tightening a rule, read every place in your code that uses that data. A rule that blocks a
+  read your app depends on breaks the app for every user;
+- test the fix locally (Firebase Emulator Suite or a Supabase branch), and **ask you before deploying**.
+
 ## What it tests
 
 **Supabase**
