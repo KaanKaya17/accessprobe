@@ -13,7 +13,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - **Supabase "Confirm email" check:** before signing up test users, accessprobe reads the project's public auth settings. If confirmation emails would be sent, it stops and nothing is created. Bouncing emails to made-up addresses can get a project's email sending restricted.
-- npm releases use Trusted Publishing (OIDC), so no npm token needs to be stored. Private repositories skip npm.
+- npm releases use Trusted Publishing (OIDC) in **stage-only** mode: no npm token is stored, and the workflow only stages a version. A maintainer makes it live with 2FA, so a compromised workflow cannot publish.
 - **Zero-config:** `npx accessprobe` in a project folder finds everything by itself.
   - **Supabase:** the URL and the public anon key come from `.env*`, `local.properties`, `app.json` or client code.
   - **Firebase:** the web config comes from `initializeApp({...})`.
@@ -28,7 +28,7 @@ All notable changes to this project are documented here. The format follows
   - Inboxes are detected from code that writes through a recipient id.
   - New test: can anyone list every entry under a node? It is critical when the entries are keyed by user id or by a secret such as a backup code.
 - `--version`.
-- **CI:** the packed package is installed and run on Ubuntu, Windows and macOS. A release workflow publishes on `v*` tags; npm needs the `NPM_TOKEN` secret.
+- **CI:** the packed package is installed and run on Ubuntu, Windows and macOS. A release workflow stages a version on `v*` tags.
 
 ### Fixed
 Most of these came from the first real-project runs and from an independent code review. The first two groups are the most important.

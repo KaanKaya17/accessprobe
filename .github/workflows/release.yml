@@ -1,17 +1,17 @@
 name: Release
-# Push a tag like v0.3.0 (matching package.json) to publish.
+# Push a tag like v0.4.0 (matching package.json) to release.
 #
-# npm: Trusted Publishing (OIDC) — no token stored anywhere. One-time setup on npmjs.com:
-#   package accessprobe → Settings → Trusted Publisher → GitHub Actions,
-#   repository KaanKaya17/accessprobe, workflow release.yml.
-# (The very first publish has to be done once by hand, because the package must exist first.)
-# An NPM_TOKEN secret still works as a fallback. Private repositories skip npm entirely.
+# npm: Trusted Publishing (OIDC), STAGE-ONLY — no token stored anywhere, and nothing goes live
+# without a human. The workflow uploads the version with `npm stage publish`; a maintainer then
+# approves it on npmjs.com (package → Staged Packages) or with `npm stage approve <id>`, both with 2FA.
+# Trusted publisher on npmjs.com: GitHub Actions, KaanKaya17/accessprobe, release.yml,
+# "Allow npm publish" unchecked. Private repositories skip npm entirely.
 on:
   push:
     tags: ['v*']
 permissions:
   contents: write
-  id-token: write # npm provenance (public repositories)
+  id-token: write # OIDC for npm trusted publishing
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22 # staged publishing needs Node >= 22.14
           registry-url: https://registry.npmjs.org
       - uses: actions/setup-java@v6
         with:
@@ -36,23 +36,21 @@ jobs:
           v=${GITHUB_REF_NAME#v}
           awk -v h="## [$v]" 'index($0, h) == 1 {f=1; next} index($0, "## [") == 1 {f=0} f' CHANGELOG.md > notes.md
           [ -s notes.md ] || { echo "CHANGELOG.md has no section for $v"; exit 1; }
-      - name: Publish to npm
+      - name: Stage on npm (a maintainer approves it with 2FA)
         if: github.event.repository.private == false
         run: |
           v=$(node -p "require('./package.json').version")
-          # already on npm (e.g. the very first version, published by hand): nothing to do
+          # already live (e.g. the very first version, published by hand): nothing to do
           if npm view "accessprobe@$v" version >/dev/null 2>&1; then
-            echo "::notice::accessprobe@$v is already on npm, skipping publish."
+            echo "::notice::accessprobe@$v is already on npm, skipping."
             exit 0
           fi
-          # Trusted Publishing needs npm >= 11.5; it also adds provenance automatically
-          npm install -g npm@11.6.2
-          npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          npm install -g npm@11.18.0 # staged publishing needs npm >= 11.15
+          npm stage publish --access public
+          echo "::notice::accessprobe@$v is staged. Approve it on https://www.npmjs.com/package/accessprobe (Staged Packages) to make it live."
       - name: npm skipped (private repository)
         if: github.event.repository.private == true
-        run: echo "::notice::Repository is private, so the package was not published to npm. Make it public to publish."
+        run: echo "::notice::Repository is private, so nothing was staged on npm."
       - name: GitHub release
         run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag || gh release edit "$GITHUB_REF_NAME" --notes-file notes.md
         env:
