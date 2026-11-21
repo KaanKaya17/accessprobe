@@ -16,7 +16,8 @@ test('setup-agent installs the Claude Code skill and an AGENTS.md section, idemp
     const r1 = run(dir);
     assert.equal(r1.status, 0, r1.stderr);
     const skill = await readFile(join(dir, '.claude', 'skills', 'rlsprobe', 'SKILL.md'), 'utf8');
-    assert.match(skill, /^---\nname: rlsprobe\ndescription: /);
+    assert.match(skill, /^---\r?\nname: rlsprobe\r?\ndescription: /);
+    assert.ok(!skill.includes('\r'), 'shipped with LF line endings (see .gitattributes)');
     assert.match(skill, /Ask the user before deploying to production/);
     const agents = await readFile(join(dir, 'AGENTS.md'), 'utf8');
     assert.ok(agents.startsWith('# My project\n\nUse pnpm.'), 'existing content kept');
