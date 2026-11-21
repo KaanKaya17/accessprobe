@@ -127,6 +127,36 @@ function makeState() {
         rls: { select: () => true, insert: () => true, update: () => false, delete: () => false },
         rows: [],
       },
+      // composite primary key: a filter on team_id alone would hit OTHER members of team 1
+      team_members: {
+        columns: { team_id: ['bigint', { pk: true, required: true }], user_id: ['uuid', { pk: true, required: true }], role: ['text'] },
+        // BUG: every member list is visible to all, and anyone may delete
+        rls: { select: (c) => authed(c), insert: (c, r) => own(c, r), update: (c, r) => own(c, r), delete: () => true },
+        rows: [
+          { team_id: 1, user_id: u1, role: 'owner' },
+          { team_id: 1, user_id: u2, role: 'member' },
+        ],
+      },
+      // BUG: USING (true) lets B reach A's rows; WITH CHECK only checks the NEW owner → takeover
+      docs: {
+        columns: { id: ['bigint', { pk: true, default: true }], user_id: ['uuid', { required: true }], title: ['text'] },
+        // shared reading (USING true for select + update) — Postgres needs the row to be SELECT-visible
+        rls: { select: (c) => authed(c), insert: (c, r) => own(c, r), update: (c) => authed(c), delete: (c, r) => own(c, r), updateCheck: (c, r) => own(c, r) },
+        rows: [],
+      },
+      // RLS would allow B's update, but a trigger rejects every update → must be inconclusive, not PASS
+      audit_notes: {
+        columns: { id: ['bigint', { pk: true, default: true }], user_id: ['uuid', { required: true }], note: ['text'] },
+        rls: { select: (c) => authed(c), insert: (c, r) => own(c, r), update: (c) => authed(c), delete: (c, r) => own(c, r) },
+        updateTriggerError: true,
+        rows: [],
+      },
+      // correct policies + varchar(16): a longer tampered marker must not fake a PASS
+      short_codes: {
+        columns: { id: ['bigint', { pk: true, default: true }], user_id: ['uuid', { required: true }], code: ['character varying', { maxLen: 16 }] },
+        rls: { select: (c, r) => own(c, r), insert: (c, r) => own(c, r), update: (c, r) => own(c, r), delete: (c, r) => own(c, r) },
+        rows: [],
+      },
       // no primary key and no text column: rlsprobe must not guess a filter
       counters: {
         columns: { user_id: ['uuid', { required: true }], value: ['integer'] },
@@ -265,12 +295,19 @@ export function createServer() {
         const page = visible.slice(0, limit);
         return send(200, page, { 'Content-Range': `${page.length ? `0-${page.length - 1}` : '*'}/${visible.length}` });
       }
+      const tooLong = (row) =>
+        Object.entries(t.columns).find(([col, [, o = {}]]) => o.maxLen && typeof row[col] === 'string' && row[col].length > o.maxLen);
+      const pkOf = Object.entries(t.columns).filter(([, [, o = {}]]) => o.pk).map(([c]) => c);
       if (req.method === 'POST') {
         const row = JSON.parse(await body(req));
         for (const [col, [format, o = {}]] of Object.entries(t.columns)) {
           if (row[col] === undefined && o.default) row[col] = format === 'uuid' ? randomUUID() : ++S.seq;
           if (row[col] === undefined && o.required) return send(400, { code: '23502', message: `null value in column "${col}"` });
         }
+        const long = tooLong(row);
+        if (long) return send(400, { code: '22001', message: `value too long for type character varying(${long[1][1].maxLen})` });
+        if (pkOf.length && t.rows.some((r) => pkOf.every((c) => String(r[c]) === String(row[c]))))
+          return send(409, { code: '23505', message: 'duplicate key value violates unique constraint' });
         if (!allow(t, 'insert', ctx, row))
           return send(403, { code: '42501', message: `new row violates row-level security policy for table "${tm[1]}"` });
         t.rows.push(row);
@@ -278,7 +315,16 @@ export function createServer() {
       }
       if (req.method === 'PATCH') {
         const patch = JSON.parse(await body(req));
+        // USING (old row) decides which rows are reachable; WITH CHECK (new row) must hold afterwards
         const hit = t.rows.filter((r) => allow(t, 'select', ctx, r) && allow(t, 'update', ctx, r) && match(r));
+        for (const r of hit) {
+          const next = { ...r, ...patch };
+          if (t.rls?.updateCheck && !ctx.bypass && !t.rls.updateCheck(ctx, next))
+            return send(403, { code: '42501', message: `new row violates row-level security policy for table "${tm[1]}"` });
+          const long = tooLong(next);
+          if (long) return send(400, { code: '22001', message: `value too long for type character varying(${long[1][1].maxLen})` });
+          if (t.updateTriggerError && hit.length) return send(400, { code: 'P0001', message: 'audit trigger: updates are not allowed' });
+        }
         hit.forEach((r) => Object.assign(r, patch));
         return send(200, ret ? hit : undefined);
       }
@@ -301,6 +347,13 @@ export function createServer() {
       if (!b.list(ctx, prefix)) return send(200, []);
       const names = [...b.objects.keys()].filter((p) => p.startsWith(prefix)).map((p) => ({ name: p.slice(prefix.length).replace(/^\//, '') }));
       return send(200, names);
+    }
+    m = u.pathname.match(/^\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
+    if (m && req.method === 'GET') {
+      const b = S.buckets[m[1]];
+      const p = decodeURIComponent(m[2]);
+      if (!b || !b.public || !b.objects.has(p)) return send(400, { error: 'not_found', message: 'Object not found' });
+      return send(200, b.objects.get(p), { 'Content-Type': 'text/plain' });
     }
     m = u.pathname.match(/^\/storage\/v1\/object\/authenticated\/([^/]+)\/(.+)$/);
     if (m && req.method === 'GET') {

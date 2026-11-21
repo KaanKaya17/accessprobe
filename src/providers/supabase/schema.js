@@ -44,6 +44,9 @@ export function parseSchema(openapi) {
       name,
       columns,
       pk: columns.find((c) => c.pk) || columns.find((c) => c.name === 'id') || null,
+      // ALL primary-key columns: a filter on just the first one of a composite key
+      // (team_members: team_id=eq.1) would hit other people's rows
+      pkCols: columns.some((c) => c.pk) ? columns.filter((c) => c.pk) : columns.filter((c) => c.name === 'id'),
       owner: guessOwner(name, columns),
       writable: Boolean(p.post || p.patch || p.delete),
       isView: !p.post && !p.patch && !p.delete,
@@ -96,7 +99,8 @@ export function buildRow(table, { ownerId, marker }) {
     const v = sampleValue(c, marker);
     if (v === undefined) return null;
     row[c.name] = v;
-    if (!row.__markerSet && isText(c)) row.__markerSet = c.name;
+    // never use a primary-key column as the marker: changing it would move the row out of our filter
+    if (!row.__markerSet && isText(c) && !c.pk) row.__markerSet = c.name;
   }
   const markerCol = row.__markerSet || null;
   delete row.__markerSet;

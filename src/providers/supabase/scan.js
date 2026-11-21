@@ -74,6 +74,7 @@ export async function scan(opts, { site, log }) {
   log('→ Signing in two test users (A and B)');
   const users = await setupUsers(client, { userA: opts.userA, userB: opts.userB, emailDomain: opts.emailDomain, log });
 
+  const created = []; // test rows, cleaned up in finally even if a probe throws
   try {
     // 3. schema — as anon AND as a signed-in user: PostgREST only lists what the role may touch
     log(`→ Reading API schema from ${url}/rest/v1/`);
@@ -92,7 +93,7 @@ export async function scan(opts, { site, log }) {
 
     // 4. probes
     log('→ Testing tables');
-    const tables = await probeTables(client, schema, users, { log });
+    const tables = await probeTables(client, schema, users, { log, created });
     findings.push(...tables.findings);
     passed.push(...tables.passed);
 
@@ -104,11 +105,6 @@ export async function scan(opts, { site, log }) {
 
     notes.push(...tables.skipped, ...storage.skipped);
     findings.push(...rpcReview(schema));
-
-    // 5. cleanup rows
-    log('→ Cleaning up test data');
-    const left = await cleanupRows(client, tables.created, users);
-    if (left.length) notes.push(`Could not delete some test rows, remove them manually: ${left.join('; ')}`);
 
     const hint = schema.rpcs.find((r) => CLEANUP_RPC_HINT.test(r));
     if (!opts.cleanupRpc && hint && users.some((u) => u.created)) {
@@ -138,7 +134,10 @@ export async function scan(opts, { site, log }) {
       },
     };
   } finally {
-    // 6. test users — always, even if a probe crashed
+    // 5. test rows, then 6. test users — always, even if a probe crashed
+    log('→ Cleaning up test data');
+    const left = await cleanupRows(client, created, users);
+    if (left.length) notes.push(`Could not delete some test rows, remove them manually: ${left.join('; ')}`);
     await cleanupUsers(client, users, opts.cleanupRpc, notes);
   }
 }
