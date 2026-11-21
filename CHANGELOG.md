@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-21
+
 ### Added
 - **PocketBase adapter** (`--platform pocketbase`, or `--url <pocketbase url>`, detected through `/api/health`). Also detected from `--source`: a `pb_migrations/` folder or the `pocketbase` JS SDK (`new PocketBase("…")`). It never asks for or uses admin / superuser credentials.
   - Collections, fields and the five API rules are read from `pb_migrations/*.js` without running them (v0.23+ `fields` and v0.22 `schema` formats, `unmarshal`, snapshots). Without migrations, names come from `pb.collection("…")` in code or `--table`.
@@ -18,6 +20,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 - `--url` without `--anon-key` is no longer assumed to be Supabase when the server answers like PocketBase.
+
+- The Claude Code skill and the `AGENTS.md` section now cover PocketBase.
 
 ### Fixed
 - **Writable views** (found by the real-Postgres test): a simple view without `security_invoker` is auto-updatable, so anonymous users could write to the base table through it. Such views are recognised from the migrations. Their findings now get the `security_invoker` fix instead of table policies, and they are not reported twice.
