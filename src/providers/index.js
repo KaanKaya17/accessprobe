@@ -3,8 +3,9 @@
 //   detect(opts, { site })            → is this app on my platform?
 //   scan(opts, { site, log })         → { target, findings, passed, notes, stats }
 import * as supabase from './supabase/index.js';
+import * as firebase from './firebase/index.js';
 
-export const providers = [supabase];
+export const providers = [supabase, firebase];
 
 export function byId(id) {
   return providers.find((p) => p.id === id);

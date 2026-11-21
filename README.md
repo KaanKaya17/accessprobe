@@ -1,9 +1,10 @@
 # rlsprobe
 
-**Prove your Supabase Row Level Security actually works.**
+**Prove your Supabase RLS and Firebase Security Rules actually work.**
 
 Most scanners check whether a policy *exists*. A policy like `using (auth.role() = 'authenticated')`
-exists, passes every checklist, and lets every logged-in user read everyone else's data.
+(Supabase) or `allow read: if request.auth != null` (Firebase) exists and passes every checklist,
+yet it lets every logged-in user read everyone else's data.
 
 rlsprobe doesn't guess. It signs up **two real test users** in your app, has user A create rows and
 files, then checks whether user B (or an anonymous visitor) can **read, change or delete** them.
@@ -25,11 +26,13 @@ npx rlsprobe --site https://your-app.lovable.app
 ```
 
 - **Evidence, not warnings.** Every critical finding is a request that actually succeeded against test data, so the findings are not false alarms.
-- **Fixes included.** `--out report.md` gives the exact policy SQL for every finding, plus a prompt you can paste into Lovable, Bolt, Cursor or Claude Code.
-- **Local and open source.** It runs on your machine and needs only the public anon key, the same key an attacker sees. Nothing is sent anywhere else.
+- **Fixes included.** `--out report.md` gives the exact policy SQL or Security Rules for every finding, plus a prompt you can paste into Lovable, Bolt, Cursor or Claude Code.
+- **Local and open source.** It runs on your machine and needs only the public keys an attacker can also see. Nothing is sent anywhere else.
 - **Zero dependencies.** Node 20+ is all you need.
 
 ## What it tests
+
+**Supabase**
 
 | Area | Check |
 |---|---|
@@ -38,8 +41,21 @@ npx rlsprobe --site https://your-app.lovable.app
 | Storage | anonymous listing, **B downloads A's file**, **B deletes A's file** |
 | Functions | lists RPCs exposed over the API for review (never calls them) |
 
-Test rows and files are deleted at the end. Test users can't be deleted with the anon key, so the
-report tells you which ones to remove.
+**Firebase**
+
+| Area | Check |
+|---|---|
+| Config | `firebaseConfig` in the site bundle, `google-services.json`, `GoogleService-Info.plist`; leaked service-account keys and FCM server keys |
+| Firestore | **B reads / lists / modifies / deletes A's documents**, **B creates a document in A's name**, anonymous read and write. Owner fields, `{uid}` path ownership and validator schemas (`hasOnly`, `is string`) are read from `firestore.rules` |
+| Realtime Database | anonymous read of the root, **B reads / overwrites A's node** (`users/$uid`), open nodes |
+| Storage | **B downloads / lists / deletes A's files**, anonymous download |
+| Rules file | test-mode time limits (`request.time < timestamp.date(…)`), `{document=**}` catch-alls |
+
+`allow read: if true` is reported as *public by design*, not as a leak.
+
+Test rows, documents and files are deleted at the end. Firebase test users delete themselves. Supabase
+test users can't be deleted with the anon key, so the report tells you which ones to remove, unless
+you pass `--cleanup-rpc`.
 
 ## Usage
 
@@ -63,6 +79,22 @@ npx rlsprobe --url ... --anon-key ... --source . \
 
 It also understands apps that keep their own `users`/`profiles` table, where `user_id` points at
 that table's id instead of `auth.uid()`. Fix SQL is generated with that mapping too.
+
+**Firebase:**
+
+```bash
+# web app: config comes from the bundle, rules and collection names from your project
+npx rlsprobe --site https://your-app.web.app --source .
+
+# Android / iOS: config from google-services.json / GoogleService-Info.plist
+npx rlsprobe --source .
+
+# against the local Emulator Suite (firebase emulators:start)
+npx rlsprobe --project-id demo-my-app --api-key any --source . --emulator
+```
+
+Email/password sign-up must be enabled. If it isn't, rlsprobe falls back to anonymous accounts, which
+still pass a rule like `request.auth != null`.
 
 **Exit codes:** `0` ok, `1` critical issue found, `2` usage error, `3` nothing could be tested.
 rlsprobe never reports a clean grade for an app it couldn't test.
@@ -92,7 +124,8 @@ project. It asks you to confirm ownership before every run unless you pass `--ye
 - [ ] GitHub Action + turn findings into permanent pgTAP regression tests
 - [ ] MCP server / Claude Code skill: agents run it after every schema change
 - [ ] Edge Function checks (auth required? cross-user IDs?)
-- [ ] Firebase (Firestore, Realtime Database, Storage), then PocketBase and Appwrite. Same two-user engine, a platform adapter for each.
+- [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)
+- [ ] PocketBase, Appwrite: same two-user engine, one adapter each
 
 ## License
 
