@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Firebase Realtime Database: paths are taken from the app code (`getReference()`/`.child()` chains) when there is no `database.rules.json`.
+- New test: can anyone list every entry under a node? It is critical when the entries are keyed by user id or by a secret such as a backup code.
+
+### Fixed
+- rlsprobe no longer writes test entries into shared nodes, where create-only rules could make them impossible to remove. This was found on the first real project.
+- Listing counts no longer include rlsprobe's own test entries.
+- Recipient-keyed nodes (invite inboxes) report overwrites as a warning with create-only advice.
+
 ## [0.2.0] - 2026-11-21
 
 ### Added
