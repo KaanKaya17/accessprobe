@@ -1,7 +1,7 @@
 {
   "name": "rlsprobe",
-  "version": "0.1.0",
-  "description": "Prove your Supabase RLS actually works: signs up two test users and checks whether user B can read, change or delete user A's data. Evidence, not guesses — plus fix SQL and a ready-to-paste AI prompt.",
+  "version": "0.2.0",
+  "description": "Prove your Supabase RLS and Firebase Security Rules actually work: two real test users, user B tries to read, change, forge and delete user A's data. Evidence, not guesses — plus fixes and a ready-to-paste AI prompt.",
   "type": "module",
   "bin": {
     "rlsprobe": "bin/rlsprobe.js"
@@ -10,7 +10,8 @@
     "bin",
     "src",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
@@ -22,13 +23,29 @@
   },
   "keywords": [
     "supabase",
+    "firebase",
+    "firestore",
     "rls",
     "row-level-security",
+    "security-rules",
     "security",
     "scanner",
+    "idor",
     "vibe-coding",
-    "lovable",
-    "idor"
+    "lovable"
   ],
+  "author": "Kaan Kaya (https://github.com/KaanKaya17)",
+  "homepage": "https://github.com/KaanKaya17/rlsprobe#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KaanKaya17/rlsprobe.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KaanKaya17/rlsprobe/issues"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/KaanKaya17"
+  },
   "license": "MIT"
 }

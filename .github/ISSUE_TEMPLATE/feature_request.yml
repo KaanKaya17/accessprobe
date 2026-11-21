@@ -1,0 +1,16 @@
+name: Feature or platform request
+description: A new check, a new backend (PocketBase, Appwrite, …) or a better report.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Which mistake should rlsprobe catch?
+      description: A concrete example of the misconfiguration is the most useful thing you can give us.
+    validations:
+      required: true
+  - type: textarea
+    id: proof
+    attributes:
+      label: How could it be proven with two test users?
+      description: Optional, if you have an idea of the request that would demonstrate it.

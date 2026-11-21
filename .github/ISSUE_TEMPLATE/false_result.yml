@@ -1,0 +1,48 @@
+name: Wrong result (false alarm or missed leak)
+description: rlsprobe flagged something that is fine, or passed something that is exposed.
+labels: [accuracy]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Accuracy is everything for this tool, so thank you.
+        **If real users' data is exposed and rlsprobe said PASS, report it privately instead:**
+        Security → Report a vulnerability. Never paste real keys, tokens or other people's data.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What went wrong?
+      options:
+        - False alarm (reported a problem, but access is correctly restricted)
+        - Missed leak (said PASS or skipped it, but the data is exposed)
+        - Inconclusive where a clear answer was possible
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [Supabase, Firebase Firestore, Firebase Realtime Database, Firebase Storage, Supabase Storage]
+    validations:
+      required: true
+  - type: textarea
+    id: rules
+    attributes:
+      label: The policy / rules involved
+      description: The RLS policy SQL or the Security Rules block for the affected table, collection or path.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: rlsprobe output
+      description: The finding or PASS line plus its proof line. Redact anything private.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: rlsprobe version and command
+      placeholder: "0.2.0 — npx rlsprobe --site … --source ."

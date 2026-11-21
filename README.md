@@ -1,5 +1,11 @@
 # rlsprobe
 
+[![CI](https://github.com/KaanKaya17/rlsprobe/actions/workflows/ci.yml/badge.svg)](https://github.com/KaanKaya17/rlsprobe/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Node 20+](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
+![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
+[![Sponsor](https://img.shields.io/badge/sponsor-%E2%9D%A4-ea4aaa)](https://github.com/sponsors/KaanKaya17)
+
 **Prove your Supabase RLS and Firebase Security Rules actually work.**
 
 Most scanners check whether a policy *exists*. A policy like `using (auth.role() = 'authenticated')`
@@ -127,6 +133,19 @@ project. It asks you to confirm ownership before every run unless you pass `--ye
 - [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)
 - [ ] PocketBase, Appwrite: same two-user engine, one adapter each
 
+## Contributing
+
+Bug reports are very welcome, especially **wrong results**: a false alarm, or a leak that rlsprobe
+passed. Use the *Wrong result* issue template. If real data is exposed, report it privately through
+[Security → Report a vulnerability](SECURITY.md). See [CONTRIBUTING.md](CONTRIBUTING.md) to set up
+the tests or add a platform.
+
+## Sponsor
+
+rlsprobe is free and MIT-licensed. If it caught something before your users did, consider
+[sponsoring the project](https://github.com/sponsors/KaanKaya17). Sponsorship pays for new platform
+adapters and keeps them tested against real backends.
+
 ## License
 
-MIT
+[MIT](LICENSE) © Kaan Kaya
