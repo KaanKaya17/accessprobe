@@ -18,7 +18,7 @@ jobs:
       # the Firebase Emulator Suite end-to-end test runs on Node 22 only (it takes ~1 min)
       RLSPROBE_SKIP_FIREBASE: ${{ matrix.node != 22 && '1' || '0' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
