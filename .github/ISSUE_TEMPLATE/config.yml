@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability or a missed leak privately
+    url: https://github.com/KaanKaya17/rlsprobe/security/advisories/new
+    about: For anything where real data could be exposed. Please don't open a public issue.
