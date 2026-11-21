@@ -35,7 +35,7 @@ export function rtdbTargets(text) {
       const vars = path.filter((p) => p.startsWith('$'));
       const conds = `${read ?? ''} ${write ?? ''}`;
       const ownerVar = vars.find((v) => new RegExp(`auth\\.uid\\s*===?\\s*\\${v}\\b|\\${v}\\s*===?\\s*auth\\.uid`).test(conds)) || null;
-      out.push({ path: path.join('/'), read, write, ownerVar });
+      out.push({ path: path.join('/'), read, write, ownerVar, validate: node['.validate'] || null });
     }
     for (const [k, v] of Object.entries(node)) if (!k.startsWith('.')) walk(v, [...path, k]);
   };
@@ -65,13 +65,12 @@ export async function probeRtdb(client, src, [A, B], { log }) {
     });
   } else if (deniedRtdb(root)) passed.push('Realtime Database: anonymous visitors cannot read the root');
 
-  let targets = src.databaseRules ? rtdbTargets(src.databaseRules) : [];
+  const targets = mergeTargets(src.databaseRules ? rtdbTargets(src.databaseRules) : [], src.rtdbCodePaths || []);
+  const fromCode = targets.filter((t) => t.fromCode).length;
   if (!src.databaseRules) {
-    // no rules file: test the paths the app itself uses (an attacker can read them from the app too)
-    targets = (src.rtdbCodePaths || []).map((path) => ({ path, ownerVar: ownerVarOf(path), fromCode: true }));
     if (targets.length) skipped.push(`Realtime Database: no database.rules.json, so ${targets.length} path(s) were taken from the app code`);
     else skipped.push('Realtime Database: no database.rules.json and no paths found in code — only the root was tested');
-  }
+  } else if (fromCode) skipped.push(`Realtime Database: ${fromCode} path(s) from the app code were added to the ones in database.rules.json`);
 
   for (const t of targets) {
     log(`  rtdb ${t.path}`);
@@ -79,16 +78,22 @@ export async function probeRtdb(client, src, [A, B], { log }) {
     const fill = (u) => t.path.replace(/\$\w+/g, (v) => (v === t.ownerVar ? u.id : `rlsprobe_${v.slice(1)}`));
     const key = `rlsprobe_${rand()}`;
     const marker = `rlsprobe-${rand()}`;
-    const aPath = `${fill(A)}/${key}`;
+    // ".validate": "newData.hasChildren([...])" on the user's node → write a record of that shape
+    // at the node itself; otherwise a plain value under a fresh child key
+    const shape = t.ownerVar ? shapeFromValidate(t.validate, marker) : null;
+    const aPath = shape ? fill(A) : `${fill(A)}/${key}`;
+    const value = shape ? shape.value : marker;
+    // RTDB returns object keys sorted, so compare canonically, not by insertion order
+    const same = (v) => canonical(v) === canonical(value);
     const tf = (f) => findings.push({ resource: t.path, ...f });
     const ownerRules = () => fix.rtdbOwnerRules(t.path.split('/$')[0]);
 
     // 1) A writes its own entry and reads it back — nothing B does counts without this.
     //    Only under A's own key: in shared nodes (rooms/$roomCode) rules are often
     //    create-only, so a test entry there could not be removed again.
-    const aw = t.ownerVar ? await client.rtdbPut(aPath, marker, { token: A.token }) : null;
+    const aw = t.ownerVar ? await client.rtdbPut(aPath, value, { token: A.token }) : null;
     const ar = ok(aw) ? await client.rtdbGet(aPath, { token: A.token }) : null;
-    const aOk = ok(aw) && ok(ar) && ar.data === marker;
+    const aOk = ok(aw) && ok(ar) && same(ar.data);
     if (aOk) fullyTested++;
 
     // 2) can someone enumerate every record under this node? (keys only, never values)
@@ -151,7 +156,7 @@ export async function probeRtdb(client, src, [A, B], { log }) {
         continue;
       }
       const br = await client.rtdbGet(aPath, { token: B.token });
-      if (ok(br) && br.data === marker) {
+      if (ok(br) && same(br.data)) {
         tf({
           id: 'rtdb-cross-user-read',
           severity: publicHint ? 'warning' : 'critical',
@@ -165,13 +170,16 @@ export async function probeRtdb(client, src, [A, B], { log }) {
       } else if (deniedRtdb(br)) passed.push(`Realtime Database /${t.path}: B cannot read A's data`);
       else skipped.push(`Realtime Database /${t.path}: read test inconclusive (${br.status})`);
 
-      // an inbox keyed by the RECIPIENT (duel_invites/$targetUserId): others are meant to write here
-      const inbox = /^\$(target|to|recipient|receiver|invitee)/i.test(t.ownerVar);
-      const bw = await client.rtdbPut(aPath, `${marker}-x`, { token: B.token });
+      // an inbox keyed by the RECIPIENT that the app's code writes into (duel_invites/$targetUserId):
+      // other users are meant to write here. Public-looking names (presence, leaderboard) only
+      // soften READ findings — someone else overwriting your presence or score is still critical.
+      const inbox = Boolean(t.inbox);
+      // same shape as A's accepted record, one string changed: only the access rule can refuse it
+      const bw = await client.rtdbPut(aPath, shape ? shape.tampered : `${marker}-x`, { token: B.token });
       if (ok(bw)) {
         tf({
           id: 'rtdb-cross-user-write',
-          severity: inbox || publicHint ? 'warning' : 'critical',
+          severity: inbox ? 'warning' : 'critical',
           title: `User B can overwrite user A's data at "/${t.path}" in the Realtime Database`,
           detail: inbox
             ? `Proven: B overwrote an entry in A's node. Other users are expected to write here (it is keyed by the recipient), but they should only be able to CREATE new entries — not overwrite or delete existing ones (".write": "!data.exists()").`
@@ -197,6 +205,61 @@ export async function probeRtdb(client, src, [A, B], { log }) {
     if (ok(aw) && !ok(await client.rtdbDelete(aPath, { token: A.token }))) left.push(aPath);
   }
   return { findings, passed, skipped, left, fullyTested, count: targets.length };
+}
+
+export function canonical(v) {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  if (v && typeof v === 'object') return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`;
+  return JSON.stringify(v);
+}
+
+// Rules paths win (they carry ownership and .validate); code paths add the keyed
+// structure rules often omit, e.g. rules say "duel_invites": {".write": "auth != null"}
+// while the code writes duel_invites/$targetUserId.
+export function mergeTargets(ruleTargets, codePaths) {
+  const norm = (p) => p.replace(/\$\w+/g, '$');
+  const out = [...ruleTargets];
+  const inboxes = codePaths.inboxes || [];
+  for (const path of codePaths) {
+    const inbox = inboxes.includes(path);
+    const same = out.find((r) => norm(r.path) === norm(path));
+    if (same) {
+      same.ownerVar ||= ownerVarOf(same.path);
+      same.inbox ||= inbox;
+      continue;
+    }
+    out.push({ path, ownerVar: ownerVarOf(path), fromCode: true, validate: null, inbox });
+  }
+  return out;
+}
+
+// "newData.hasChildren(['score','level','nickname']) && newData.child('score').isNumber()"
+//   -> { value: { score: 1, level: 1, nickname: marker }, tampered: {..., nickname: marker-x} }
+export function shapeFromValidate(validate, marker) {
+  if (!validate) return null;
+  const kids = validate.match(/newData\.hasChildren\(\s*\[([^\]]*)\]\s*\)/);
+  if (!kids) return null;
+  const names = kids[1].split(',').map((k) => k.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+  const typeOf = (k) => {
+    const m = validate.match(new RegExp(`newData\\.child\\(\\s*['"]${k}['"]\\s*\\)\\.is(Number|String|Boolean)\\(\\)`));
+    return m ? m[1] : null;
+  };
+  const value = {};
+  let markerKey = null;
+  for (const k of names) {
+    const t = typeOf(k);
+    if (t === 'Number') value[k] = 1;
+    else if (t === 'Boolean') value[k] = false;
+    else if (t === 'String' || /name|title|text|nick/i.test(k)) {
+      value[k] = marker;
+      markerKey ??= k;
+    } else value[k] = /time|date|at$/i.test(k) ? Date.now() : { rlsprobe: marker };
+  }
+  if (!markerKey) {
+    value.rlsprobe = marker; // extra child: only safe if the rule does not forbid unknown keys
+    markerKey = 'rlsprobe';
+  }
+  return { value, tampered: { ...value, [markerKey]: `${marker}-x` } };
 }
 
 // ---------------------------------------------------------------- Storage

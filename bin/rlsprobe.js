@@ -29,6 +29,9 @@ Firebase
   --project-id <id>      Firebase project id (skip discovery)
   --api-key <key>        Web API key (AIza…, public by design)
   --emulator             Test against the local Firebase Emulator Suite (default ports)
+  --database-rules <f>   Rules exported from the console, if they are not in --source:
+  --firestore-rules <f>    firebase database:get /.settings/rules > database.rules.json
+  --storage-rules <f>
 
 Common
   --user-a <email:pw>    Existing test user A (default: sign up a new one)
@@ -66,6 +69,9 @@ const OPTIONS = {
   'project-id': { type: 'string' },
   'api-key': { type: 'string' },
   emulator: { type: 'boolean' },
+  'database-rules': { type: 'string' },
+  'firestore-rules': { type: 'string' },
+  'storage-rules': { type: 'string' },
   table: { type: 'string', multiple: true },
   only: { type: 'string', multiple: true },
   bucket: { type: 'string', multiple: true },
@@ -119,6 +125,9 @@ try {
     projectId: v['project-id'],
     apiKey: v['api-key'],
     emulator: v.emulator,
+    databaseRules: v['database-rules'],
+    firestoreRules: v['firestore-rules'],
+    storageRules: v['storage-rules'],
     tables: v.table,
     only: v.only,
     buckets: v.bucket,

@@ -11,6 +11,7 @@ const SOURCE = fileURLToPath(new URL('./firebase/', import.meta.url));
 let emu = null;
 let result = null;
 let codeOnly = null;
+let codeAndRules = null;
 const CODE_ONLY = fileURLToPath(new URL('./firebase-app-code/', import.meta.url));
 let skipReason = available() ? null : 'Java/npx not available';
 
@@ -33,6 +34,16 @@ before(async () => {
   result = await scan({ platform: 'firebase', projectId: PROJECT_ID, apiKey: 'fake-api-key', source: SOURCE, emulator: true, quiet: true });
   // same emulator, but an app folder with NO rules files: paths come from Java code only
   codeOnly = await scan({ platform: 'firebase', projectId: PROJECT_ID, apiKey: 'fake-api-key', source: CODE_ONLY, emulator: true, quiet: true });
+  // app code + rules exported from the console (the real-world setup that found the inbox gap)
+  codeAndRules = await scan({
+    platform: 'firebase',
+    projectId: PROJECT_ID,
+    apiKey: 'fake-api-key',
+    source: CODE_ONLY,
+    databaseRules: fileURLToPath(new URL('./firebase/database.rules.json', import.meta.url)),
+    emulator: true,
+    quiet: true,
+  });
 }, { timeout: 300000 });
 
 after(async () => {
@@ -116,10 +127,24 @@ test('shared nodes get no rlsprobe test entries (they might be create-only and i
 });
 
 t('no rules files: RTDB paths are taken from app code and tested for real', () => {
-  assert.ok(codeOnly.notes.some((n) => /2 path\(s\) were taken from the app code/.test(n)), codeOnly.notes.join('\n'));
+  assert.ok(codeOnly.notes.some((n) => /3 path\(s\) were taken from the app code/.test(n)), codeOnly.notes.join('\n'));
   assert.ok(codeOnly.findings.some((f) => f.id === 'rtdb-cross-user-read' && f.resource === 'users/$uid'));
   assert.ok(codeOnly.findings.some((f) => f.id === 'rtdb-list' && f.resource === 'backups' && f.severity === 'critical'));
   assert.ok(!codeOnly.notes.some((n) => /Could not delete/.test(n)), codeOnly.notes.join('\n'));
+});
+
+t('rules .validate shape is used, so a schema-checked user node is fully tested', () => {
+  assert.ok(!result.notes.some((n) => n.includes('/scores/$uid: user A could not write')), result.notes.join('\n'));
+  assert.ok(result.passed.includes('Realtime Database /scores/$uid: B cannot write to A\'s data'));
+  const leak = result.findings.find((f) => f.id === 'rtdb-cross-user-read' && f.resource === 'scores/$uid');
+  assert.equal(leak?.severity, 'warning', 'score-like nodes are probably public on purpose');
+});
+
+t('rules without key level + code with it: the inbox structure from code is tested', () => {
+  const inv = codeAndRules.findings.filter((f) => f.resource === 'invites/$targetUserId');
+  assert.ok(inv.some((f) => f.id === 'rtdb-cross-user-read' && f.severity === 'critical'), JSON.stringify(inv.map((f) => f.id)));
+  assert.ok(inv.some((f) => f.id === 'rtdb-cross-user-write' && f.severity === 'warning'), 'inbox overwrite is a warning');
+  assert.ok(codeAndRules.notes.some((n) => /path\(s\) from the app code were added/.test(n)));
 });
 
 t('no test data or users are left behind; report renders rules fixes', () => {

@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { FirebaseClient, DEFAULT_EMULATOR } from './client.js';
 import { extract } from './discover.js';
@@ -31,6 +32,14 @@ export async function scan(opts, { site, log }) {
   const fromSite = site ? extract(site.sources) : { configs: [], findings: [] };
   findings.push(...fromSite.findings);
   const src = opts.source ? await scanSource(opts.source) : { configs: [], collections: [] };
+  // rules exported from the console (e.g. firebase database:get /.settings/rules) override files in --source
+  for (const [flag, key] of [
+    ['databaseRules', 'databaseRules'],
+    ['firestoreRules', 'firestoreRules'],
+    ['storageRules', 'storageRules'],
+  ]) {
+    if (opts[flag]) src[key] = await readFile(opts[flag], 'utf8');
+  }
   cfg = fromSite.configs[0] || src.configs[0] || null;
   if (opts.apiKey || opts.projectId) cfg = { ...(cfg || {}), ...(opts.apiKey && { apiKey: opts.apiKey }), ...(opts.projectId && { projectId: opts.projectId }) };
   if (!cfg?.apiKey || !cfg?.projectId) throw new Error('Firebase apiKey / projectId not found. Pass --api-key and --project-id, or --site / --source.');

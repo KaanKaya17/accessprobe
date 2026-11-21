@@ -28,43 +28,60 @@ export function rtdbPathsFromCode(texts) {
     return `$${id ? id[1].replace(/^get/, '').replace(/^./, (c) => c.toLowerCase()) : 'id'}`;
   };
   const argsOf = (chain) => [...chain.matchAll(CHILD_ARG_RE)].map((m) => resolve(m[1]));
+  // what follows a chain: .setValue(/.push(/.updateChildren(/.removeValue( means the app WRITES there
+  const writesAfter = (t, end) => /^\s*(?:\.child\([^()]*\))*\s*\.(?:setValue|push|updateChildren|removeValue|runTransaction)\(/.test(t.slice(end, end + 160));
 
   const refs = {}; // variable -> base segments
   const templates = new Set();
-  const add = (segs) => {
+  const written = new Set(); // templates the app writes through
+  const add = (segs, isWrite = false) => {
     const clean = segs.flatMap((s) => s.split('/')).filter(Boolean);
     if (!clean.length || clean[0].startsWith('.') || clean[0].startsWith('$')) return;
     const i = clean.findIndex((s) => s.startsWith('$'));
-    templates.add((i === -1 ? clean : clean.slice(0, i + 1)).join('/'));
+    const tpl = (i === -1 ? clean : clean.slice(0, i + 1)).join('/');
+    templates.add(tpl);
+    if (isWrite) written.add(tpl);
   };
 
   for (const t of texts) {
     for (const m of t.matchAll(REF_ASSIGN_RE)) {
       const base = [resolve(m[2]), ...argsOf(m[3] || '')].filter((x) => x !== '');
       refs[m[1]] = base;
-      if (base.length) add(base);
+      if (base.length) add(base, writesAfter(t, m.index + m[0].length));
     }
   }
   for (const t of texts) {
-    for (const m of t.matchAll(DIRECT_RE)) add([resolve(m[1]), ...argsOf(m[2])]);
+    for (const m of t.matchAll(DIRECT_RE)) add([resolve(m[1]), ...argsOf(m[2])], writesAfter(t, m.index + m[0].length));
     for (const m of t.matchAll(CHAIN_RE)) {
       if (!(m[1] in refs)) continue; // snapshot.child(...) etc.
-      add([...refs[m[1]], ...argsOf(m[2])]);
+      add([...refs[m[1]], ...argsOf(m[2])], writesAfter(t, m.index + m[0].length));
     }
   }
-  // one template per node: "backups/$code" and "backups/$upperCode" are the same node;
-  // prefer a variable name that reads as a user id
+  // One template per node: "backups/$code" and "backups/$upperCode" are the same node.
+  // Ranking: a recipient-style variable the app WRITES through (an inbox: others write
+  // into your node) > a user-id variable that is written > any user-id variable > anything.
+  const rank = (x) => {
+    const recipient = RECIPIENT_VAR.test(x);
+    if (recipient && written.has(x)) return 3;
+    if (ownerVarOf(x) && !recipient && written.has(x)) return 2;
+    if (ownerVarOf(x)) return 1;
+    return 0;
+  };
   const byParent = new Map();
   for (const p of templates) {
     const parent = p.includes('$') ? p.slice(0, p.lastIndexOf('/$')) : p;
     const prev = byParent.get(parent);
-    // ranking: recipient-style name (others write here) > user-id name > anything
-    const rank = (x) => (/\$(target|to|recipient|receiver|invitee)/i.test(x) ? 2 : ownerVarOf(x) ? 1 : 0);
     if (!prev || rank(p) > rank(prev)) byParent.set(parent, p);
   }
   const all = [...byParent.values()];
-  return all.filter((p) => !all.some((q) => q !== p && q.startsWith(`${p}/`) && !p.includes('$'))).sort();
+  const paths = all.filter((p) => !all.some((q) => q !== p && q.startsWith(`${p}/`) && !p.includes('$'))).sort();
+  // inboxes: nodes keyed by the recipient that other users write into
+  paths.inboxes = paths.filter((p) => rank(p) === 3);
+  return paths;
 }
+
+// $targetUserId, $toUid, $recipientId … : someone ELSE's id
+export const RECIPIENT_VAR = /\$(target|to[A-Z_]|recipient|receiver|invitee)/;
 
 export function ownerVarOf(template) {
   const v = template.split('/').find((s) => s.startsWith('$'));

@@ -16,6 +16,10 @@ public class GameStore {
         database.child(BACKUP_NODE).child(code).setValue(data);
     }
 
+    void invite(String targetUserId, Invite inv) {
+        database.child("invites").child(targetUserId).push().setValue(inv);
+    }
+
     void read(DataSnapshot snapshot) {
         snapshot.child("ignored").getValue(String.class); // DataSnapshot, not a path
     }
