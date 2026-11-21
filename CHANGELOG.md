@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **GitHub Action** (`uses: KaanKaya17/accessprobe@v0.5.0`): runs accessprobe on every pull request against a local Supabase (`supabase start`) or the Firebase Emulator Suite. It fails only on proven critical leaks and puts the report into the job summary.
+- **A real-Postgres end-to-end test** in CI: a local Supabase with migrations that mix broken and correct rules.
+
+### Fixed
+- **Writable views** (found by the real-Postgres test): a simple view without `security_invoker` is auto-updatable, so anonymous users could write to the base table through it. Such views are recognised from the migrations. Their findings now get the `security_invoker` fix instead of table policies, and they are not reported twice.
+
 ## [0.4.0] - 2026-11-21
 
 ### Added

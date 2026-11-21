@@ -109,7 +109,8 @@ export async function probeEscalation(client, t, mine, A, h) {
 // protectedRows: A's test rows that B could NOT read directly. Run before cleanup.
 export async function probeViews(client, relations, protectedRows, [A, B], h) {
   const { findings, passed, skipped, policyDenied, msg } = h;
-  const views = relations.filter((r) => r.isView);
+  const isView = (r) => r.isView || r.sourceView;
+  const views = relations.filter(isView);
   const live = protectedRows.filter((m) => !m.deleted && m.markerCol && m.marker);
   if (!relations.length) return;
   if (!live.length) {
@@ -125,15 +126,18 @@ export async function probeViews(client, relations, protectedRows, [A, B], h) {
   for (const v of relations) {
     const a = await look(v.name, A.token);
     if (!a.hits?.length) {
-      if (v.isView) skipped.push(`${v.name}: view shows none of A's test rows, so it could not be tested`);
+      if (isView(v)) skipped.push(`${v.name}: view shows none of A's test rows, so it could not be tested`);
       continue;
     }
     const tables = [...new Set(a.hits.map((m) => m.table.name))];
-    const what = `${v.isView ? 'view' : 'relation'} "${v.name}"`;
-    for (const [who, token, id] of [
-      ['user B', B.token, 'view-bypass'],
-      ['anonymous', undefined, 'view-bypass-anon'],
+    const what = `${isView(v) ? 'view' : 'relation'} "${v.name}"`;
+    // already proven by the normal tests through a writable view: don't report it twice
+    const proven = (ids) => findings.some((f) => f.table === v.name && ids.includes(f.id));
+    for (const [who, token, id, same] of [
+      ['user B', B.token, 'view-bypass', ['cross-user-read']],
+      ['anonymous', undefined, 'view-bypass-anon', ['anon-read-owned', 'anon-write']],
     ]) {
+      if (proven(same)) continue;
       const b = await look(v.name, token);
       if (b.hits?.length) {
         findings.push({
