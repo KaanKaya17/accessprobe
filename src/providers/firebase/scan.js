@@ -12,11 +12,21 @@ export const label = 'Firebase';
 
 const COLLECTION_IN_BUNDLE = /\bcollection(?:Group)?\(\s*(?:[\w$.]+\s*,\s*)?["'`]([A-Za-z_][\w-]*)["'`]/g;
 
+const sourceCache = new Map();
+const sourceOf = (dir) => {
+  if (!sourceCache.has(dir)) sourceCache.set(dir, scanSource(dir));
+  return sourceCache.get(dir);
+};
+
+// A google-services.json alone is not enough: many apps only use Firebase for push or analytics.
+// Firebase is tested when the project actually uses one of its databases or Storage.
 export async function detect(opts, { site }) {
   if (opts.apiKey || opts.projectId) return true;
   if (site && extract(site.sources).configs.length) return true;
   if (opts.source) {
-    return ['firebase.json', 'firestore.rules', 'google-services.json', join('app', 'google-services.json')].some((f) => existsSync(join(opts.source, f)));
+    if (['firestore.rules', 'database.rules.json', 'storage.rules'].some((f) => existsSync(join(opts.source, f)))) return true;
+    const src = await sourceOf(opts.source);
+    return src.configs.length > 0 && (src.collections.length > 0 || src.rtdbCodePaths.length > 0 || Boolean(src.firestoreRules || src.databaseRules || src.storageRules));
   }
   return false;
 }
@@ -31,7 +41,7 @@ export async function scan(opts, { site, log }) {
   let cfg = null;
   const fromSite = site ? extract(site.sources) : { configs: [], findings: [] };
   findings.push(...fromSite.findings);
-  const src = opts.source ? await scanSource(opts.source) : { configs: [], collections: [] };
+  const src = opts.source ? { ...(await sourceOf(opts.source)) } : { configs: [], collections: [] };
   // rules exported from the console (e.g. firebase database:get /.settings/rules) override files in --source
   for (const [flag, key] of [
     ['databaseRules', 'databaseRules'],

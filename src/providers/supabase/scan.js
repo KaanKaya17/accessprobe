@@ -1,4 +1,7 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { SupabaseClient, decodeJwt } from './client.js';
+import { findProjectConfig } from './project-config.js';
 import { extract } from './discover.js';
 import { parseSchema } from './schema.js';
 import { scanSource, sourceToDefinitions } from './source.js';
@@ -9,14 +12,22 @@ const CLEANUP_RPC_HINT = /^(delete_(my_)?(own_)?(account|user|profile)|delete_me
 export const id = 'supabase';
 export const label = 'Supabase';
 
-// Is this app a Supabase app? Explicit flags, config in the site bundle, or a supabase/ folder.
+// project folder config is looked up once per run and shared by detect() and scan()
+const projectCache = new Map();
+const projectConfig = (dir) => {
+  if (!projectCache.has(dir)) projectCache.set(dir, findProjectConfig(dir));
+  return projectCache.get(dir);
+};
+
+// Is this app a Supabase app? Explicit flags, config in the site bundle, a supabase/ folder,
+// or a Supabase URL/anon key somewhere in the project (.env, local.properties, client code).
 export async function detect(opts, { site }) {
   if (opts.url || opts.anonKey) return true;
   if (site && extract(site.sources).anonKeys.length) return true;
   if (opts.source) {
-    const { existsSync } = await import('node:fs');
-    const { join } = await import('node:path');
-    return existsSync(join(opts.source, 'supabase'));
+    if (existsSync(join(opts.source, 'supabase'))) return true;
+    const cfg = await projectConfig(opts.source);
+    return cfg.urls.length > 0 && cfg.anonKeys.length > 0;
   }
   return false;
 }
@@ -37,8 +48,20 @@ export async function scan(opts, { site, log }) {
     anonKey ||= d.anonKeys[0];
     if (d.urls.length > 1) notes.push(`Multiple Supabase URLs found, using ${url}: ${d.urls.join(', ')}`);
   }
+  // 1b. config from the project folder (.env, local.properties, client code)
+  if (opts.source) {
+    const pc = await projectConfig(opts.source);
+    findings.push(...pc.findings);
+    notes.push(...pc.notes);
+    if (!url && pc.urls[0]) {
+      url = pc.urls[0];
+      log(`  found Supabase URL in the project: ${url}`);
+    }
+    if (!anonKey && pc.anonKeys[0]) anonKey = pc.anonKeys[0];
+    if (pc.urls.length > 1 && !opts.url) notes.push(`Several Supabase URLs in the project, using ${url} (pass --url to choose): ${pc.urls.join(', ')}`);
+  }
   if (!url || !anonKey) {
-    throw new Error('Supabase URL / anon key not found. Pass them with --url and --anon-key.');
+    throw new Error('Supabase URL / anon key not found. Pass them with --url and --anon-key (the public anon key, never the service_role key).');
   }
   const payload = decodeJwt(anonKey);
   if (payload?.role === 'service_role' || anonKey.startsWith('sb_secret_')) {

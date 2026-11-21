@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { scan } from '../src/core/scan.js';
 import { printReport, markdownReport, grade, color } from '../src/core/report.js';
@@ -9,6 +11,7 @@ const HELP = `
 rlsprobe — prove your backend's access rules actually work (Supabase, Firebase)
 
 Usage
+  npx rlsprobe                  test the project in this folder (finds the config itself)
   npx rlsprobe setup-agent      teach Claude Code / Codex / Cursor in this project to use rlsprobe
   npx rlsprobe --site https://your-app.com --source .
   npx rlsprobe --url https://xyz.supabase.co --anon-key eyJ... --source .
@@ -47,6 +50,7 @@ Common
   --json                 Print the raw result as JSON
   --yes                  Skip the "I own this app" confirmation (for CI)
   -q, --quiet            Less output
+  -v, --version
   -h, --help
 
 What it does
@@ -81,6 +85,7 @@ const OPTIONS = {
   yes: { type: 'boolean' },
   quiet: { type: 'boolean', short: 'q' },
   help: { type: 'boolean', short: 'h' },
+  version: { type: 'boolean', short: 'v' },
 };
 
 let v;
@@ -102,10 +107,29 @@ if (positionals[0] === 'setup-agent') {
   process.exit(2);
 }
 
-const target = v.site || v.url || (v['project-id'] && `Firebase project ${v['project-id']}`) || v.source;
+if (v.version) {
+  const { readFileSync } = await import('node:fs');
+  console.log(JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
+  process.exit(0);
+}
+
+// `npx rlsprobe` inside a project folder: test that project
+if (!v.help && !v.site && !v.url && !v['project-id'] && !v.source && looksLikeProject(process.cwd())) {
+  v.source = '.';
+  console.error(color.dim(`No target given — testing the project in this folder (${process.cwd()}).`));
+}
+
+const target = v.site || v.url || (v['project-id'] && `Firebase project ${v['project-id']}`) || (v.source && `the project in ${v.source === '.' ? process.cwd() : v.source}`);
 if (v.help || !target) {
   console.log(HELP);
   process.exit(v.help ? 0 : 2);
+}
+
+function looksLikeProject(dir) {
+  return [
+    'package.json', 'supabase', 'firebase.json', 'firestore.rules', 'database.rules.json', 'pubspec.yaml',
+    'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'local.properties', '.env', '.env.local',
+  ].some((f) => existsSync(join(dir, f)));
 }
 
 if (!v.yes) {

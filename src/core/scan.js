@@ -31,15 +31,24 @@ export async function scan(opts) {
   }
 
   const results = [];
+  const failures = [];
   for (const p of chosen) {
-    const r = await p.scan(opts, { site, log });
-    results.push({ provider: p, result: r });
+    try {
+      results.push({ provider: p, result: await p.scan(opts, { site, log }) });
+    } catch (e) {
+      // one backend failing must not throw away another backend's results
+      if (chosen.length === 1) throw e;
+      failures.push(`[${p.label}] not tested: ${e.message.split('\n')[0]}`);
+      log(`  ${p.label} skipped: ${e.message.split('\n')[0]}`);
+    }
   }
+  if (!results.length) throw new Error(failures.join('\n'));
 
   const findings = [];
   const passed = [];
   const notes = [];
-  const many = results.length > 1;
+  const many = results.length > 1 || failures.length > 0;
+  notes.push(...failures);
   if (site) {
     const generic = genericSecrets(site.sources);
     findings.push(...generic);
