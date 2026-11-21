@@ -11,6 +11,7 @@ test('Realtime Database paths are recovered from Java/Kotlin/JS reference chains
     DatabaseReference codeRef = database.child(BACKUP_NODE).child(code);
     DatabaseReference again = database.child(BACKUP_NODE).child(upperCode);
     invitesRootRef.child(targetUserId).child(inviteId).child("status").setValue(s);
+    incomingUserRef = invitesRootRef.child(userId);
     DatabaseReference roomRef = database.child("rooms").child(roomCode);
     String n = snapshot.child("nickname").getValue(String.class);
     FirebaseDatabase.getInstance().getReference(".info/connected");`;

@@ -22,6 +22,14 @@ before(async () => {
     skipReason = `emulator did not start: ${e.message.split('\n')[0]}`;
     return;
   }
+  // existing app data (as in any real app): one backup written by some real user.
+  // "Bearer owner" is the emulator's admin bypass — used only by this test setup, never by rlsprobe.
+  const seed = await fetch(`${emu.hosts.database}/backups/ABC123.json?ns=${emu.hosts.rtdbNamespace}`, {
+    method: 'PUT',
+    headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nickname: 'someone', stats: { total_games: 3 } }),
+  });
+  if (!seed.ok) throw new Error(`seeding failed: ${seed.status}`);
   result = await scan({ platform: 'firebase', projectId: PROJECT_ID, apiKey: 'fake-api-key', source: SOURCE, emulator: true, quiet: true });
   // same emulator, but an app folder with NO rules files: paths come from Java code only
   codeOnly = await scan({ platform: 'firebase', projectId: PROJECT_ID, apiKey: 'fake-api-key', source: CODE_ONLY, emulator: true, quiet: true });
@@ -95,7 +103,16 @@ t('Realtime Database: a node keyed by backup codes that any user can list is cri
   const f = result.findings.find((x) => x.id === 'rtdb-list' && x.resource === 'backups');
   assert.ok(f, 'backups listing not found');
   assert.equal(f.severity, 'critical');
+  assert.match(f.title, /all 1 entry under/, 'counts the real entry, not rlsprobe test data');
   assert.ok(result.passed.includes('Realtime Database /backups/$code: anonymous visitors cannot write'));
+});
+
+test('shared nodes get no rlsprobe test entries (they might be create-only and impossible to clean up)', async (ctx) => {
+  if (skipReason) return ctx.skip(skipReason);
+  const r = await fetch(`${emu.hosts.database}/backups.json?ns=${emu.hosts.rtdbNamespace}&shallow=true`, {
+    headers: { Authorization: 'Bearer owner' },
+  });
+  assert.deepEqual(Object.keys(await r.json()), ['ABC123']);
 });
 
 t('no rules files: RTDB paths are taken from app code and tested for real', () => {

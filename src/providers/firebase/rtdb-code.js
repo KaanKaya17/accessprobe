@@ -58,7 +58,9 @@ export function rtdbPathsFromCode(texts) {
   for (const p of templates) {
     const parent = p.includes('$') ? p.slice(0, p.lastIndexOf('/$')) : p;
     const prev = byParent.get(parent);
-    if (!prev || (!ownerVarOf(prev) && ownerVarOf(p)) || (ownerVarOf(prev) && ownerVarOf(p) && p.length < prev.length)) byParent.set(parent, p);
+    // ranking: recipient-style name (others write here) > user-id name > anything
+    const rank = (x) => (/\$(target|to|recipient|receiver|invitee)/i.test(x) ? 2 : ownerVarOf(x) ? 1 : 0);
+    if (!prev || rank(p) > rank(prev)) byParent.set(parent, p);
   }
   const all = [...byParent.values()];
   return all.filter((p) => !all.some((q) => q !== p && q.startsWith(`${p}/`) && !p.includes('$'))).sort();

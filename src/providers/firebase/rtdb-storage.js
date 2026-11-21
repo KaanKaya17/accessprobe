@@ -83,8 +83,10 @@ export async function probeRtdb(client, src, [A, B], { log }) {
     const tf = (f) => findings.push({ resource: t.path, ...f });
     const ownerRules = () => fix.rtdbOwnerRules(t.path.split('/$')[0]);
 
-    // 1) A writes its own entry and reads it back — nothing B does counts without this
-    const aw = await client.rtdbPut(aPath, marker, { token: A.token });
+    // 1) A writes its own entry and reads it back — nothing B does counts without this.
+    //    Only under A's own key: in shared nodes (rooms/$roomCode) rules are often
+    //    create-only, so a test entry there could not be removed again.
+    const aw = t.ownerVar ? await client.rtdbPut(aPath, marker, { token: A.token }) : null;
     const ar = ok(aw) ? await client.rtdbGet(aPath, { token: A.token }) : null;
     const aOk = ok(aw) && ok(ar) && ar.data === marker;
     if (aOk) fullyTested++;
@@ -101,12 +103,14 @@ export async function probeRtdb(client, src, [A, B], { log }) {
       ]) {
         const r = await client.rtdbGet(parent, { token, shallow: true });
         if (ok(r) && r.data && typeof r.data === 'object' && Object.keys(r.data).length) {
-          const n = Object.keys(r.data).length;
+          // don't count rlsprobe's own test entries as other people's data
+          const n = Object.keys(r.data).filter((k) => k !== A.id && k !== B.id && !k.startsWith('rlsprobe')).length;
+          const what = n ? `all ${n} entr${n === 1 ? 'y' : 'ies'}` : 'every entry (only the test entry exists yet)';
           findings.push({
             id: who === 'anonymous' ? 'rtdb-anon-list' : 'rtdb-list',
             resource: parent,
             severity: publicHint ? 'warning' : sensitive ? 'critical' : 'warning',
-            title: `${who === 'anonymous' ? 'Anyone (not logged in)' : 'Any signed-in user'} can list all ${n} entries under "/${parent}"`,
+            title: `${who === 'anonymous' ? 'Anyone (not logged in)' : 'Any signed-in user'} can list ${what} under "/${parent}"`,
             detail: SECRET_KEY.test(keyVar)
               ? `Entries are keyed by ${keyVar} — if that is meant to be secret (a backup or invite code), listing the node hands out every code.`
               : t.ownerVar
@@ -114,7 +118,7 @@ export async function probeRtdb(client, src, [A, B], { log }) {
                 : publicHint
                   ? 'Looks like public data (leaderboard / presence). Fine if intended.'
                   : 'Anyone can enumerate every record here. Fine only if this data is meant to be public.',
-            evidence: `${who}: ${r.evidence} → ${n} keys`,
+            evidence: `${who}: ${r.evidence} → ${n} keys besides the test users`,
             fix: { code: ownerRules() },
           });
           break; // anonymous already implies signed-in
@@ -161,13 +165,17 @@ export async function probeRtdb(client, src, [A, B], { log }) {
       } else if (deniedRtdb(br)) passed.push(`Realtime Database /${t.path}: B cannot read A's data`);
       else skipped.push(`Realtime Database /${t.path}: read test inconclusive (${br.status})`);
 
+      // an inbox keyed by the RECIPIENT (duel_invites/$targetUserId): others are meant to write here
+      const inbox = /^\$(target|to|recipient|receiver|invitee)/i.test(t.ownerVar);
       const bw = await client.rtdbPut(aPath, `${marker}-x`, { token: B.token });
       if (ok(bw)) {
         tf({
           id: 'rtdb-cross-user-write',
-          severity: 'critical',
+          severity: inbox || publicHint ? 'warning' : 'critical',
           title: `User B can overwrite user A's data at "/${t.path}" in the Realtime Database`,
-          detail: 'Proven: B overwrote a value A wrote.',
+          detail: inbox
+            ? `Proven: B overwrote an entry in A's node. Other users are expected to write here (it is keyed by the recipient), but they should only be able to CREATE new entries — not overwrite or delete existing ones (".write": "!data.exists()").`
+            : 'Proven: B overwrote a value A wrote.',
           evidence: `as user B: ${bw.evidence}`,
           fix: { code: ownerRules() },
         });
