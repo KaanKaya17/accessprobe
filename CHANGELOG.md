@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Zero-config:** running `npx rlsprobe` in a project folder now finds everything by itself. The Supabase URL and public anon key come from `.env*`, `local.properties`, `app.json` or client code, and the Firebase web config from `initializeApp({...})`. Secret keys are never used. A secret key in a browser-exposed variable (`VITE_`, `NEXT_PUBLIC_`, `EXPO_PUBLIC_`, …) or in client code is reported as critical.
+- `--version`.
+- CI installs the packed package on Ubuntu, Windows and macOS and runs the installed binary. A release workflow publishes to npm on `v*` tags; it needs the `NPM_TOKEN` secret.
+
+### Changed
+- Firebase is only auto-detected when the project uses Firestore, Realtime Database or Storage. A `google-services.json` that is only there for push notifications no longer triggers test sign-ups.
+- If one backend fails while several are tested, the other backend's results are kept.
+- Text files are pinned to LF line endings (`.gitattributes`). This fixes failures on Windows checkouts.
 - `rlsprobe setup-agent` installs a Claude Code skill and an `AGENTS.md` section (for Codex, Cursor and others), so coding agents run rlsprobe safely: they confirm ownership, report only proven findings, read the app's data access before changing a rule, test locally and ask before deploying. It never overwrites existing files.
 - Firebase Realtime Database: paths are taken from the app code (`getReference()`/`.child()` chains) when there is no `database.rules.json`.
 - New test: can anyone list every entry under a node? It is critical when the entries are keyed by user id or by a secret such as a backup code.

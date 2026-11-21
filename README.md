@@ -16,8 +16,14 @@ rlsprobe doesn't guess. It signs up **two real test users** in your app, has use
 files, then checks whether user B (or an anonymous visitor) can **read, change or delete** them.
 
 ```bash
-npx rlsprobe --site https://your-app.lovable.app
+cd your-app
+npx rlsprobe
 ```
+
+That's it. rlsprobe finds your Supabase or Firebase config in `.env`, `local.properties`,
+`google-services.json` or your code, using only the public key an attacker would also see. Then it
+reads your migrations or rules and runs the tests. Add `--site https://your-app.com` to also check
+the deployed JavaScript bundle for leaked secret keys.
 
 ```
 ✖ CRITICAL  User B can read user A's rows in "orders"
