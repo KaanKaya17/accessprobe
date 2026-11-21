@@ -39,6 +39,12 @@ jobs:
       - name: Publish to npm
         if: github.event.repository.private == false
         run: |
+          v=$(node -p "require('./package.json').version")
+          # already on npm (e.g. the very first version, published by hand): nothing to do
+          if npm view "rlsprobe@$v" version >/dev/null 2>&1; then
+            echo "::notice::rlsprobe@$v is already on npm, skipping publish."
+            exit 0
+          fi
           # Trusted Publishing needs npm >= 11.5; it also adds provenance automatically
           npm install -g npm@11.6.2
           npm publish --access public
