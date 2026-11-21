@@ -59,6 +59,12 @@
           },
           {
             "context": "package (macos-latest)"
+          },
+          {
+            "context": "real-supabase"
+          },
+          {
+            "context": "firebase-action"
           }
         ]
       }
