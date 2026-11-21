@@ -7,8 +7,17 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **PocketBase adapter** (`--platform pocketbase`, or `--url <pocketbase url>`, detected through `/api/health`). Also detected from `--source`: a `pb_migrations/` folder or the `pocketbase` JS SDK (`new PocketBase("…")`). It never asks for or uses admin / superuser credentials.
+  - Collections, fields and the five API rules are read from `pb_migrations/*.js` without running them (v0.23+ `fields` and v0.22 `schema` formats, `unmarshal`, snapshots). Without migrations, names come from `pb.collection("…")` in code or `--table`.
+  - Two test users sign up through the `users` collection, A creates a record (marker text, owner = A), then B and an anonymous visitor try to view, list, modify, take over, forge and delete it. A 404 or an empty list only counts as a pass when A's control read through the same endpoint shows the record unchanged. Test records are always cleaned up; test users delete themselves, or the report lists them.
+  - **Users making themselves admin:** when a rule trusts a field of the caller's own record (`@request.auth.role = "admin"`), A tries to set it. The fix is an update rule with `@request.body.role:isset = false`.
+  - Fixes are PocketBase API rule strings, plus the same change as a `pb_migrations` file.
+- End-to-end tests against a real PocketBase binary (v0.40.6, downloaded once into `~/.cache/accessprobe` and checked against the release's SHA-256). Set `ACCESSPROBE_SKIP_POCKETBASE=1` to skip them.
 - **GitHub Action** (`uses: KaanKaya17/accessprobe@v0.5.0`): runs accessprobe on every pull request against a local Supabase (`supabase start`) or the Firebase Emulator Suite. It fails only on proven critical leaks and puts the report into the job summary.
 - **A real-Postgres end-to-end test** in CI: a local Supabase with migrations that mix broken and correct rules.
+
+### Changed
+- `--url` without `--anon-key` is no longer assumed to be Supabase when the server answers like PocketBase.
 
 ### Fixed
 - **Writable views** (found by the real-Postgres test): a simple view without `security_invoker` is auto-updatable, so anonymous users could write to the base table through it. Such views are recognised from the migrations. Their findings now get the `security_invoker` fix instead of table policies, and they are not reported twice.

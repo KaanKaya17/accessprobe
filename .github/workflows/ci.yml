@@ -32,6 +32,11 @@ jobs:
         with:
           path: ~/.cache/firebase/emulators
           key: firebase-emulators-${{ runner.os }}-15.35.0
+      # the PocketBase end-to-end test downloads a pinned release binary from GitHub
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/accessprobe
+          key: pocketbase-${{ runner.os }}-${{ runner.arch }}-0.40.6
       - run: npm test
 
   # install the packed tarball like `npx accessprobe` would, then use the installed binary

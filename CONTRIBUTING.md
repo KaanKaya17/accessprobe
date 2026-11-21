@@ -6,8 +6,10 @@ Thanks for helping. A few rules keep accessprobe trustworthy.
 
 1. **Never report a PASS that wasn't proven.** A check passes only when the backend explicitly
    refused the request (Supabase/PostgREST `42501`, Firestore `403 PERMISSION_DENIED`, RTDB
-   `401 Permission denied`, Storage `403 No … permission`). A 404, a 400, a timeout or a `200` with
-   an empty result is *inconclusive* and goes into the notes.
+   `401 Permission denied`, Storage `403 No … permission`, PocketBase `403` for a superusers-only
+   rule). A 404, a 400, a timeout or a `200` with an empty result is *inconclusive* and goes into the
+   notes, unless the backend hides rows by design (PostgREST, PocketBase) and the owner's control read
+   through the same endpoint proves the row exists and is unchanged.
 2. **Every critical finding is a request that succeeded** against data the test users created
    themselves. Never print other people's data, only counts and column or field names.
 3. **Zero runtime dependencies.** Node 20+ built-ins only. Dev tooling, such as the Firebase emulator
@@ -26,6 +28,9 @@ npm test
 - **Firebase** tests run against the real Firebase Emulator Suite (`test/firebase/`). They need Java
   11+. The first run downloads the emulator jars, which takes about a minute. Set
   `ACCESSPROBE_SKIP_FIREBASE=1` to skip them.
+- **PocketBase** tests run against a real PocketBase binary (`test/pocketbase/`). The first run
+  downloads a pinned release (about 13 MB, SHA-256 checked) into `~/.cache/accessprobe`. Set
+  `ACCESSPROBE_SKIP_POCKETBASE=1` to skip them.
 
 Try the CLI against the vulnerable demo:
 

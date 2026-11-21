@@ -8,7 +8,7 @@ import { scan, plan } from '../src/core/scan.js';
 import { printReport, markdownReport, grade, color } from '../src/core/report.js';
 
 const HELP = `
-accessprobe — prove your backend's access rules actually work (Supabase, Firebase)
+accessprobe — prove your backend's access rules actually work (Supabase, Firebase, PocketBase)
 
 Usage
   npx accessprobe                  test the project in this folder (finds the config itself)
@@ -16,6 +16,7 @@ Usage
   npx accessprobe --site https://your-app.com --source .
   npx accessprobe --url https://xyz.supabase.co --anon-key eyJ... --source .
   npx accessprobe --project-id my-app --api-key AIza... --source .
+  npx accessprobe --url https://pb.your-app.com --source .
 
 Options
   --site <url>           Your deployed app. Finds the backend config in its JS
@@ -23,11 +24,18 @@ Options
   --source <dir>         Your project folder. Supabase: supabase/migrations/*.sql and
                          table names in code. Firebase: firestore.rules, storage.rules,
                          database.rules.json, google-services.json, collection names.
-  --platform <name>      Force a backend (default: auto-detect): supabase, firebase
+                         PocketBase: pb_migrations/*.js (collections + API rules),
+                         new PocketBase("…") and pb.collection("…") in code.
+  --platform <name>      Force a backend (default: auto-detect): supabase, firebase,
+                         pocketbase
 
 Supabase
   --url <url>            Supabase project URL (skip discovery)
   --anon-key <key>       Public anon / publishable key
+
+PocketBase
+  --url <url>            PocketBase server URL. Never pass admin / superuser
+                         credentials: test users sign up through "users".
 
 Firebase
   --project-id <id>      Firebase project id (skip discovery)
@@ -43,8 +51,9 @@ Common
   --email-domain <d>     Domain for auto-created test users (default: example.com)
   --cleanup-rpc <fn>     At the end, call this RPC as each test user to delete them
                          (e.g. delete_my_account). Also applies to --user-a/--user-b!
-  --table <name>         Also test this table (repeatable; for when the schema is hidden)
-  --only <name>          Test only this table (repeatable)
+  --table <name>         Also test this table / collection (repeatable; for when the
+                         schema is hidden)
+  --only <name>          Test only this table / collection (repeatable)
   --bucket <name>        Also test this storage bucket (repeatable)
   --out <file.md>        Write a Markdown report with fix SQL + AI prompts
   --json                 Print the raw result as JSON
@@ -127,7 +136,7 @@ if (v.help || !target) {
 
 function looksLikeProject(dir) {
   return [
-    'package.json', 'supabase', 'firebase.json', 'firestore.rules', 'database.rules.json', 'pubspec.yaml',
+    'package.json', 'supabase', 'pb_migrations', 'firebase.json', 'firestore.rules', 'database.rules.json', 'pubspec.yaml',
     'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'local.properties', '.env', '.env.local',
   ].some((f) => existsSync(join(dir, f)));
 }
