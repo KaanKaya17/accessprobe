@@ -81,9 +81,14 @@ function guessOwner(table, columns) {
 }
 
 // Builds a plausible row for an INSERT probe. Returns null if we can't satisfy a required column.
-export function buildRow(table, { ownerId, marker }) {
+// fixed: values for columns the caller already knows (e.g. the organization id of a tenant table)
+export function buildRow(table, { ownerId, marker, fixed = {} }) {
   const row = {};
   for (const c of table.columns) {
+    if (c.name in fixed) {
+      row[c.name] = fixed[c.name];
+      continue;
+    }
     if (table.owner && c.name === table.owner.name) {
       row[c.name] = ownerId;
       continue;

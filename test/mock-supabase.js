@@ -41,6 +41,9 @@ function makeState() {
   const appId = (c) => c.uid && S.tables.app_users.rows.find((r) => r.auth_id === c.uid)?.user_id;
   const mineApp = (c, r) => appId(c) !== undefined && String(r.user_id) === String(appId(c));
   const ownApp = () => ({ select: mineApp, insert: mineApp, update: mineApp, delete: mineApp });
+  const membership = (c, org) => c.uid && S.tables.org_members.rows.find((m) => m.org_id === org && m.user_id === c.uid);
+  const member = (c, org) => Boolean(membership(c, org));
+  const admin = (c, org) => ['owner', 'admin'].includes(membership(c, org)?.role);
   const S = {
     users: new Map(), // email -> {id, password}
     tables: {
@@ -129,6 +132,42 @@ function makeState() {
       guestbook: {
         columns: { id: ['bigint', { pk: true, default: true }], message: ['text', { required: true }] },
         rls: { select: () => true, insert: () => true, update: () => false, delete: () => false },
+        rows: [],
+      },
+      // ---- organizations: orgs, org_members (org_id, user_id, role), tables scoped by org_id
+      orgs: {
+        columns: { id: ['bigint', { pk: true, default: true }], name: ['text', { required: true }], created_by: ['uuid', { required: true }] },
+        rls: { select: (c, r) => member(c, r.id) || own(c, r, 'created_by'), insert: (c, r) => own(c, r, 'created_by'), update: (c, r) => admin(c, r.id), delete: (c, r) => own(c, r, 'created_by') },
+        rows: [],
+      },
+      org_members: {
+        columns: { org_id: ['bigint', { pk: true, required: true, fk: 'orgs' }], user_id: ['uuid', { pk: true, required: true }], role: ['text'] },
+        rls: {
+          select: (c, r) => member(c, r.org_id),
+          // BUG: "users insert their own membership" lets anyone join any org (as owner, even)
+          insert: (c, r) => own(c, r) || admin(c, r.org_id),
+          // BUG: "users update their own membership" lets members change their role
+          update: (c, r) => own(c, r) || admin(c, r.org_id),
+          delete: (c, r) => own(c, r) || admin(c, r.org_id),
+        },
+        rows: [],
+      },
+      // CORRECT: members only, read from the membership table
+      projects: {
+        columns: { id: ['bigint', { pk: true, default: true }], org_id: ['bigint', { required: true, fk: 'orgs' }], name: ['text', { required: true }] },
+        rls: { select: (c, r) => member(c, r.org_id), insert: (c, r) => member(c, r.org_id), update: (c, r) => member(c, r.org_id), delete: (c, r) => admin(c, r.org_id) },
+        rows: [],
+      },
+      // BUG: readable by every signed-in user
+      invoices: {
+        columns: { id: ['bigint', { pk: true, default: true }], org_id: ['bigint', { required: true, fk: 'orgs' }], label: ['text', { required: true }] },
+        rls: { select: (c) => authed(c), insert: (c, r) => member(c, r.org_id), update: (c, r) => member(c, r.org_id), delete: (c, r) => admin(c, r.org_id) },
+        rows: [],
+      },
+      // BUG: membership from the JWT (app_metadata.orgs): a removed member keeps access until the token is refreshed
+      org_files: {
+        columns: { id: ['bigint', { pk: true, default: true }], org_id: ['bigint', { required: true, fk: 'orgs' }], path: ['text', { required: true }] },
+        rls: { select: (c, r) => c.orgs?.includes(r.org_id) || member(c, r.org_id), insert: (c, r) => member(c, r.org_id), update: (c, r) => member(c, r.org_id), delete: (c, r) => admin(c, r.org_id) },
         rows: [],
       },
       // composite primary key: a filter on team_id alone would hit OTHER members of team 1
@@ -266,7 +305,7 @@ function ctxFrom(req) {
   const p = parse(auth);
   if (!p) return { role: 'anon' };
   if (p.role === 'service_role') return { role: 'service_role', bypass: true };
-  return { role: p.role, uid: p.sub };
+  return { role: p.role, uid: p.sub, orgs: p.app_metadata?.orgs || [] };
 }
 
 const allow = (t, op, ctx, row) => ctx.bypass || !t.rls || t.rls[op](ctx, row);
@@ -325,7 +364,7 @@ export function createServer({ autoconfirm = true } = {}) {
       const { email, password } = JSON.parse(await body(req));
       const user = S.users.get(email);
       if (!user || user.password !== password) return send(400, { error: 'invalid_grant', error_description: 'Invalid login credentials' });
-      return send(200, { access_token: jwt({ sub: user.id, role: 'authenticated', email }), user: { id: user.id, email } });
+      return send(200, { access_token: jwt({ sub: user.id, role: 'authenticated', email, app_metadata: { orgs: S.tables.org_members.rows.filter((m) => m.user_id === user.id).map((m) => m.org_id) } }), user: { id: user.id, email } });
     }
 
     // ---------- PostgREST ----------

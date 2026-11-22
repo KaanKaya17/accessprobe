@@ -41,6 +41,18 @@ expect(passed("notes_invoker(): B gets none of A's private rows"), 'notes_invoke
 const wipe = r.findings.find((f) => f.resource === 'wipe_canary' && f.id === 'definer-no-auth-check');
 expect(Boolean(wipe) && /does not remove the anon/.test(wipe.detail), 'wipe_canary(): static SECURITY DEFINER warning, notes that REVOKE FROM public is not enough');
 
+// organizations (20261122000000_orgs.sql)
+const sev = (table, id) => r.findings.find((f) => f.table === table && f.id === id)?.severity;
+expect(sev('invoices', 'cross-tenant-read') === 'critical', 'invoices: outsider reads another organization\'s rows (proven)');
+expect(passed('projects: users outside the organization cannot read its rows'), 'projects: outsiders refused (passed)');
+expect(passed('org_members: users cannot add themselves to another user\'s organization'), 'org_members: self-join refused (passed)');
+expect(passed('org_members: users outside an organization cannot list its members'), 'org_members: member list hidden from outsiders (passed)');
+expect(sev('org_members', 'tenant-role-escalation') === 'critical', 'org_members: a member makes itself owner (proven)');
+expect(sev('org_files', 'removed-member-access') === 'critical', 'org_files: JWT-claim policy keeps a removed member in (proven)');
+expect(passed('projects: removed members lose access right away'), 'projects: removed member loses access (passed)');
+expect(!r.findings.some((f) => ['projects', 'orgs'].includes(f.table)), 'projects / orgs: no findings');
+expect(r.notes.some((n) => n.startsWith('Organizations: tested orgs with members in org_members.org_id')), 'organization model detected');
+
 expect(!r.notes.some((n) => n.startsWith('Could not delete')), 'cleanup removed every test row');
 
 if (errors.length) {
