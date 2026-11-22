@@ -1,6 +1,7 @@
 // Minimal Supabase HTTP client (PostgREST, GoTrue, Storage). Zero dependencies.
 
 import { readOnlyBlock } from '../../core/read-only.js';
+import { fetchRetry, throttled, RATE_LIMITED } from '../../core/http.js';
 
 export class SupabaseClient {
   constructor({ url, anonKey, timeoutMs = 15000, readOnly = false }) {
@@ -34,12 +35,7 @@ export class SupabaseClient {
     let res;
     let text;
     try {
-      res = await fetch(this.url + path, {
-        method,
-        headers: h,
-        body: payload,
-        signal: AbortSignal.timeout(this.timeoutMs),
-      });
+      res = await fetchRetry(this.url + path, { method, headers: h, body: payload }, { timeoutMs: this.timeoutMs });
       text = await res.text();
     } catch (e) {
       // network error / timeout: an inconclusive result (status 0), never a crash and never a PASS
@@ -50,6 +46,10 @@ export class SupabaseClient {
         headers: new Headers(),
         evidence: `${method} ${path} → network error`,
       };
+    }
+    if (throttled(res)) {
+      // still throttled after the retries: inconclusive, never "refused"
+      return { ok: false, status: 0, rateLimited: true, data: { message: RATE_LIMITED }, headers: res.headers, evidence: `${method} ${path} → ${res.status} (rate limited)` };
     }
     let data = text;
     try {

@@ -376,7 +376,7 @@ jobs:
           eval "$(supabase status -o env)"
           echo "SB_URL=$API_URL" >> "$GITHUB_ENV"
           echo "SB_ANON=${ANON_KEY:-$PUBLISHABLE_KEY}" >> "$GITHUB_ENV"
-      - uses: KaanKaya17/accessprobe@v0.10.0
+      - uses: KaanKaya17/accessprobe@v0.11.0
         with:
           args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source .
 ```
@@ -388,12 +388,40 @@ jobs:
         with: { distribution: temurin, java-version: '21' }
       - run: npx firebase-tools emulators:start --only auth,firestore,database,storage --project demo-ci &
       - run: npx wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099
-      - uses: KaanKaya17/accessprobe@v0.10.0
+      - uses: KaanKaya17/accessprobe@v0.11.0
         with:
           args: --project-id demo-ci --api-key fake --source . --emulator
 ```
 
-The step fails when a critical leak is **proven** (`fail-on: never` only warns), and the report with fix SQL or rules goes into the job summary. Inputs: `args`, `working-directory`, `report`, `fail-on`, `summary`. Outputs: `exit-code`, `report`. On public repositories the job summary is public too; set `summary: false` if that matters.
+The step fails when a critical leak is **proven** (`fail-on: never` only warns), and the report with fix SQL or rules goes into the job summary. Inputs: `args`, `working-directory`, `report`, `fail-on`, `summary`, `sarif`. Outputs: `exit-code`, `report`, `sarif`. On public repositories the job summary is public too; set `summary: false` if that matters.
+
+### Findings in the Security tab and on the pull request (SARIF)
+
+Set `sarif:` and upload the file. Each finding then shows up under **Security → Code scanning**, and on the pull request it is placed on the line that leaks: the policy for that table and command in `supabase/migrations` (the SELECT policy for a read leak), the `match` block in `firestore.rules` / `storage.rules`, the node in `database.rules.json`, the collection in `pb_migrations` or `appwrite.json`. Accepted findings (`.accessprobeignore`) are left out.
+
+```yaml
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      # … start the backend as above …
+      - uses: KaanKaya17/accessprobe@v0.11.0
+        with:
+          args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source .
+          sarif: accessprobe.sarif
+          fail-on: never   # let the upload run; code scanning blocks the merge instead
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: accessprobe.sarif
+          category: accessprobe
+```
+
+Without the Action: `npx accessprobe --source . --sarif accessprobe.sarif`. Code scanning is free on public repositories; private ones need GitHub Advanced Security.
+
+### Rate limits
+
+Backends throttle bursts of requests, sign-ups especially. accessprobe waits and retries a throttled request (it follows `Retry-After`, up to 3 tries). A check that is still throttled after that is listed under one "Rate limited" note and is **never counted as passed**. Run again later, use `--only <table>`, or pass existing users with `--user-a` / `--user-b` (Supabase limits sign-ups per hour).
 
 accessprobe tests itself this way: [`e2e.yml`](.github/workflows/e2e.yml) runs it against real Postgres, PostgREST and GoTrue, and against the Firebase emulators, on every pull request.
 
@@ -439,6 +467,9 @@ project (unless you pass `--read-only`). It asks you to confirm ownership before
 - [x] Firebase: anonymous-auth attacker, and findings as Security Rules regression tests (`--rules-tests`)
 - [x] MCP server: agents run it after every schema change (`npx accessprobe mcp`)
 - [x] `--read-only` for production, and `.accessprobeignore` for things that are open on purpose
+- [x] SARIF output for GitHub code scanning (`--sarif`), findings placed on the leaking policy / rule
+- [ ] Team / organization roles (other org, member vs admin, removed member)
+- [ ] Sensitive columns in readable tables, `SECURITY DEFINER` functions, `pg_graphql`
 - [ ] Edge Function checks (auth required? cross-user IDs?)
 - [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)
 - [x] Privilege escalation (users editing their own `role` / `plan`) and views that skip RLS

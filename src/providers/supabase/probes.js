@@ -55,6 +55,11 @@ export async function setupUsers(client, { userA, userB, emailDomain = 'example.
       email = s.email;
       password = `Rp-${randomUUID()}`;
       const r = await client.signUp(email, password);
+      if (r.rateLimited)
+        throw fail(
+          `Sign-up of test user ${s.label} was rate limited (HTTP 429). Supabase limits sign-ups per hour (Authentication → Rate Limits).\n` +
+            '  Wait, or pass two existing users with --user-a email:password --user-b email:password.',
+        );
       if (!r.ok) throw fail(`Sign-up of test user ${s.label} failed (${r.status}): ${msg(r.data)}`);
       created = true;
       madeSoFar.push(email);

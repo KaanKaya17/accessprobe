@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-22
+
+### Added
+- **`--sarif <file>`** writes the findings as SARIF 2.1.0 for GitHub code scanning (`github/codeql-action/upload-sarif`) and other SARIF viewers. Each result is placed on the line that leaks: the newest policy for that table and command in the migrations or `--schema` files (a read leak points at the SELECT policy, an update leak at the UPDATE policy), the `CREATE TABLE` when there is no policy, `bucket_id = '…'` for storage, the `match /…` block in `firestore.rules` / `storage.rules`, the node in `database.rules.json`, the collection in `pb_migrations` or `appwrite.json`. Paths are relative to the repository root, so they resolve when the Action runs in a subfolder. Rules carry `security-severity` (critical 9.1, warning 5.3, info 2.0) and results a stable fingerprint, so an alert stays the same alert across runs. Accepted findings are left out.
+- GitHub Action: `sarif` input and output.
+- e2e: the real-Postgres run writes SARIF; it must validate against the SARIF 2.1.0 schema and every result must point into the fixture's migrations.
+
+### Fixed
+- **A rate limit could pass a check.** A Supabase Storage download or delete by user B that got HTTP 429 counted as "B cannot download / delete A's files", because any 4xx counted as refused. All four clients now retry a 429 (and a 503 with `Retry-After`) up to 3 times, following `Retry-After` (at most 8 s per wait). A request that is still throttled comes back as inconclusive, like a network error, so it can never pass.
+- The report folds all throttled checks into one "Rate limited" note that names the tables and checks. A throttled Supabase sign-up says that sign-ups are limited per hour and suggests `--user-a` / `--user-b`.
+
 ## [0.10.0] - 2026-11-22
 
 ### Added

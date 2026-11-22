@@ -3,6 +3,7 @@
 // accessprobe never asks for, accepts or uses superuser (admin) credentials.
 
 import { readOnlyBlock } from '../../core/read-only.js';
+import { fetchRetry, throttled, RATE_LIMITED } from '../../core/http.js';
 
 export class PocketBaseClient {
   constructor({ url, timeoutMs = 15000, readOnly = false }) {
@@ -25,11 +26,15 @@ export class PocketBaseClient {
     let res;
     let text;
     try {
-      res = await fetch(this.url + path, { method, headers, body: payload, signal: AbortSignal.timeout(this.timeoutMs) });
+      res = await fetchRetry(this.url + path, { method, headers, body: payload }, { timeoutMs: this.timeoutMs });
       text = await res.text();
     } catch (e) {
       // network error / timeout: inconclusive (status 0), never a crash and never a PASS
       return { ok: false, status: 0, data: { message: `network error: ${e.cause?.code || e.name || e.message}` }, evidence: `${method} ${shown} → network error` };
+    }
+    if (throttled(res)) {
+      // still throttled after the retries: inconclusive, never "refused"
+      return { ok: false, status: 0, rateLimited: true, data: { message: RATE_LIMITED }, evidence: `${method} ${shown} → ${res.status} (rate limited)` };
     }
     let data = text;
     try {
