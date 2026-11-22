@@ -14,7 +14,7 @@ All notable changes to this project are documented here. The format follows
   - Test documents and files are deleted. Appwrite clients cannot delete their own account, so test users block themselves and the report lists them for deletion in the console.
   - Fixes are Appwrite permission strings, the `appwrite.json` snippet when the project has one, and a `Permission` / `Role` SDK snippet.
   - An Appwrite API key in a browser-exposed env var or in the site bundle is reported.
-- Unit tests against a mock Appwrite server that applies permissions the way the Appwrite docs describe.
+- Unit tests against a mock Appwrite server, and a `real-appwrite` e2e job against a pinned self-hosted Appwrite 2.7.4 (schema created from the fixture appwrite.json; a server key is used for that setup and the cleanup check only). The job also records the real answers the adapter relies on (status codes, error types, default permissions, session cookies), and the mock follows them.
 
 ### Changed
 - `--project-id` with `--url` (and without `--api-key`), or with `--platform appwrite`, now means the Appwrite project; Firebase is no longer started for it. `--url` pointing at an Appwrite server is no longer assumed to be Supabase.

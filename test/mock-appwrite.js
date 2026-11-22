@@ -5,11 +5,13 @@
 //   roles: guests → any, guests;  signed-in users → any, users, user:<id>
 //   collection permissions apply to every document; document permissions only count when
 //   documentSecurity (rowSecurity / fileSecurity) is on.
-//   get:    no collection read and security off → 401 user_unauthorized; not readable → 404 document_not_found
+//   get:    not readable (also with security off and no collection read) → 404 document_not_found
 //   list:   no collection read and security off → 401; else only the readable documents
 //   create: needs collection create → else 401. Without permissions, a user gets read/update/delete
 //           on its own document; a guest gets none. Permissions may only name the caller's roles.
 //   update/delete: document missing → 404; not allowed → 401 user_unauthorized
+//   an Origin header that is not a registered platform → 403 general_unknown_origin
+//   (checked against a real Appwrite 2.7.4 by test/appwrite/behaviour.mjs in the real-appwrite CI job)
 //
 // Run directly: node test/mock-appwrite.js [port]   (then: npx accessprobe --url http://localhost:<port>/v1 --project-id accessprobe-test --source test/appwrite/app)
 
@@ -70,6 +72,8 @@ export function createServer({ config, signupOpen = true, noTablesDb = false } =
     if (!path.startsWith('/v1/')) return error(404, 'general_route_not_found', 'Route not found');
     if (req.headers['x-appwrite-key']) return error(500, 'test_failure', 'accessprobe must never send an API key');
     if (req.headers['x-appwrite-project'] !== PROJECT_ID) return error(404, 'project_not_found', 'Project with the requested ID could not be found.');
+    // no web platforms are registered: a browser Origin is refused, a server-side client sends none
+    if (req.headers.origin) return error(403, 'general_unknown_origin', `Invalid Origin. Register your new client (${req.headers.origin}) as a new Web platform on your project console dashboard`);
 
     // ---- who is calling
     let user = null;
@@ -87,7 +91,8 @@ export function createServer({ config, signupOpen = true, noTablesDb = false } =
       user = state.users.get(s.userId);
       if (!user || user.status === false) return error(401, 'user_blocked', 'The current user has been blocked.');
     }
-    const roles = user ? ['any', 'users', `user:${user.$id}`] : ['any', 'guests'];
+    // test users never verify their email: Appwrite adds the /unverified dimension
+    const roles = user ? ['any', 'users', `user:${user.$id}`, `user:${user.$id}/unverified`, 'users/unverified'] : ['any', 'guests'];
     let body = {};
     const ctype = req.headers['content-type'] || '';
     if (ctype.startsWith('application/json') && raw.length) {
@@ -177,7 +182,7 @@ export function createServer({ config, signupOpen = true, noTablesDb = false } =
         return send(200, { total: all.length, [M.listKey]: all.slice(0, limit).map(out) });
       }
       if (req.method === 'POST' && !docId) {
-        if (!grants(c.perms, 'create', roles)) return unauthorized();
+        if (!grants(c.perms, 'create', roles)) return error(401, 'user_unauthorized', user ? "No permissions provided for action 'create'" : `Missing "create" permission for role "users". Only "${JSON.stringify(roles)}" scopes are allowed and "[\"users\"]" was given.`);
         const data = body.data || {};
         // like Appwrite's Structure validator: required attributes first, then unknown ones, then values
         for (const a of c.attrs) if (a.required && (data[a.key] === undefined || data[a.key] === null)) return error(400, 'document_invalid_structure', `Invalid document structure: Missing required attribute "${a.key}"`);
@@ -200,7 +205,6 @@ export function createServer({ config, signupOpen = true, noTablesDb = false } =
       }
       const d = docId && c.docs.get(docId);
       if (req.method === 'GET' && docId) {
-        if (!c.security && !grants(c.perms, 'read', roles)) return unauthorized();
         if (!d || !can('read', d)) return error(404, M.notFound, `${M.noun} with the requested ID could not be found.`);
         return send(200, out(d));
       }

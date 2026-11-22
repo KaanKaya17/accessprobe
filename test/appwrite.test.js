@@ -118,6 +118,8 @@ test('only the project header and the session cookie are sent — never an API k
   assert.ok(server.state.requests.length > 50);
   for (const r of server.state.requests) {
     assert.equal(r.headers['x-appwrite-key'], undefined);
+    // real Appwrite refuses an unregistered Origin with 403 general_unknown_origin: never send one
+    assert.equal(r.headers.origin, undefined);
     // (other adapters' detection probes, e.g. PocketBase's <url>/api/health, carry no Appwrite headers)
     if (r.path.startsWith('/v1/') && !/health/.test(r.path)) assert.equal(r.headers['x-appwrite-project'], PROJECT_ID, r.path);
   }

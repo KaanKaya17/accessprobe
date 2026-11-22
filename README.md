@@ -355,7 +355,7 @@ project. It asks you to confirm ownership before every run unless you pass `--ye
 - [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)
 - [x] Privilege escalation (users editing their own `role` / `plan`) and views that skip RLS
 - [x] PocketBase: collection API rules, users and privilege escalation (tested against a real PocketBase binary)
-- [x] Appwrite: collection, document and bucket permissions, documents and TablesDB APIs
+- [x] Appwrite: collection, document and bucket permissions, documents and TablesDB APIs (tested against a real self-hosted Appwrite)
 
 ## Contributing
 
