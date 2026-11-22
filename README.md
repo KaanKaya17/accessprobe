@@ -290,7 +290,7 @@ jobs:
           eval "$(supabase status -o env)"
           echo "SB_URL=$API_URL" >> "$GITHUB_ENV"
           echo "SB_ANON=${ANON_KEY:-$PUBLISHABLE_KEY}" >> "$GITHUB_ENV"
-      - uses: KaanKaya17/accessprobe@v0.7.0
+      - uses: KaanKaya17/accessprobe@v0.8.0
         with:
           args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source .
 ```
@@ -302,7 +302,7 @@ jobs:
         with: { distribution: temurin, java-version: '21' }
       - run: npx firebase-tools emulators:start --only auth,firestore,database,storage --project demo-ci &
       - run: npx wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099
-      - uses: KaanKaya17/accessprobe@v0.7.0
+      - uses: KaanKaya17/accessprobe@v0.8.0
         with:
           args: --project-id demo-ci --api-key fake --source . --emulator
 ```

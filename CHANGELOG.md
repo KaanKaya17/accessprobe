@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-22
+
 ### Added
 - **Appwrite adapter** (`--platform appwrite`, or `--url <endpoint> --project-id <id>`; an endpoint is detected through the public `/v1/health/version`). Also detected from `--source`: `appwrite.json` / `appwrite.config.json`, or the Appwrite SDK with `setProject("…")`. It never asks for or uses API keys or console credentials: only `X-Appwrite-Project` and the test users' own sessions.
   - Collections (attributes, `$permissions`, `documentSecurity`), TablesDB tables and buckets are read from `appwrite.json`. Without it, ids come from `databases.createDocument("db", "…")` / `tablesDB.createRow({ databaseId, tableId })` calls, env vars or `--table <database>/<collection>`, and attributes are guessed from Appwrite's answers.
