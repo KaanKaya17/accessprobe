@@ -150,7 +150,7 @@ export async function scan(opts, { site, log }) {
     await probeGraphql(client, { findings, passed, skipped: fnSkipped, only: opts.only });
 
     notes.push(...tables.skipped, ...tenantSkipped, ...storage.skipped, ...fnSkipped);
-    findings.push(...rpcReview(schema));
+    findings.push(...rpcReview(schema, passed));
 
     const hint = schema.rpcs.find((r) => CLEANUP_RPC_HINT.test(r));
     if (!opts.cleanupRpc && hint && users.some((u) => u.created)) {

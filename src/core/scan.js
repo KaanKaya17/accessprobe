@@ -1,6 +1,7 @@
 // Orchestrates one run: fetch the site once, pick the platform adapter(s),
 // run them, merge their results into one report.
 
+import { resolve } from 'node:path';
 import { fetchSite, genericSecrets } from './site.js';
 import { providers, byId } from '../providers/index.js';
 import { applyAccept, acceptRecipes } from './accept.js';
@@ -53,8 +54,10 @@ async function choose(opts, site) {
   }
   if (!chosen.length) {
     throw new Error(
-      `No supported backend found (${providers.map((p) => p.label).join(', ')}).\n` +
-        '  Pass --platform, or the project details (e.g. --url and --anon-key for Supabase).',
+      `No supported backend found (${providers.map((p) => p.label).join(', ')})${opts.source ? ` in ${resolve(opts.source)}` : ''}.\n` +
+        (opts.source
+          ? '  Is that your project folder? Pass --source <your project folder>, --platform, or the project details (e.g. --url and --anon-key for Supabase).'
+          : '  Pass --platform, or the project details (e.g. --url and --anon-key for Supabase).'),
     );
   }
   return chosen;

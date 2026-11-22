@@ -66,3 +66,19 @@ test('grade is N/A when nothing was tested', () => {
   assert.equal(grade([], { tables: 0 }), 'N/A');
   assert.equal(grade([], { tables: 3 }), 'A');
 });
+
+test('cli: "no backend found" names the folder it looked in', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const empty = mkdtempSync(join(tmpdir(), 'ap-empty-'));
+  let err = '';
+  try {
+    execFileSync(process.execPath, [new URL('../bin/accessprobe.js', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'), '--source', empty, '--yes'], { stdio: 'pipe' });
+  } catch (e) {
+    err = String(e.stderr);
+  }
+  assert.ok(err.includes(`No supported backend found`), err);
+  assert.ok(err.includes(empty), err);
+});
