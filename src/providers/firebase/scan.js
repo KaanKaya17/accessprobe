@@ -6,6 +6,7 @@ import { extract } from './discover.js';
 import { scanSource } from './source.js';
 import { setupUsers, deleteUsers, probeFirestore } from './probes.js';
 import { probeRtdb, probeStorage } from './rtdb-storage.js';
+import { ownsProjectId as appwriteOwnsProjectId } from '../appwrite/scan.js';
 
 export const id = 'firebase';
 export const label = 'Firebase';
@@ -21,7 +22,9 @@ const sourceOf = (dir) => {
 // A google-services.json alone is not enough: many apps only use Firebase for push or analytics.
 // Firebase is tested when the project actually uses one of its databases or Storage.
 export async function detect(opts, { site }) {
-  if (opts.apiKey || opts.projectId) return true;
+  if (opts.apiKey) return true;
+  // --project-id is shared with Appwrite (with --url, or when it is the id in appwrite.json)
+  if (opts.projectId && !(await appwriteOwnsProjectId(opts))) return true;
   if (site && extract(site.sources).configs.length) return true;
   if (opts.source) {
     if (['firestore.rules', 'database.rules.json', 'storage.rules'].some((f) => existsSync(join(opts.source, f)))) return true;
@@ -40,7 +43,11 @@ function pickConfig(configs, opts) {
   return configs[0] || null;
 }
 
+// an Appwrite project id (see appwrite/scan.js) is never used as the Firebase project
+const ownOpts = async (opts) => ((await appwriteOwnsProjectId(opts)) ? { ...opts, projectId: undefined } : opts);
+
 export async function describe(opts, { site }) {
+  opts = await ownOpts(opts);
   const fromSite = site ? extract(site.sources).configs : [];
   const src = opts.source ? await sourceOf(opts.source) : { configs: [] };
   const cfg = pickConfig([...fromSite, ...src.configs], opts);
@@ -50,6 +57,7 @@ export async function describe(opts, { site }) {
 }
 
 export async function scan(opts, { site, log }) {
+  opts = await ownOpts(opts);
   const t0 = Date.now();
   const findings = [];
   const passed = [];

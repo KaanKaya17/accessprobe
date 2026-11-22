@@ -16,14 +16,14 @@ const PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
 const TARGET_PROPS = {
   directory: { type: 'string', description: 'Project folder (default: the folder the server was started in). Relative paths below resolve against it.' },
-  source: { type: 'string', description: 'Folder with supabase/migrations, firestore.rules, pb_migrations, … (default: directory, when no site/url/project_id is given).' },
+  source: { type: 'string', description: 'Folder with supabase/migrations, firestore.rules, pb_migrations, appwrite.json, … (default: directory, when no site/url/project_id is given).' },
   site: { type: 'string', description: 'Deployed app URL. accessprobe finds the backend config in its JavaScript and checks the bundle for leaked secret keys.' },
-  url: { type: 'string', description: 'Supabase project URL or PocketBase server URL.' },
+  url: { type: 'string', description: 'Supabase project URL, PocketBase server URL or Appwrite endpoint (https://cloud.appwrite.io/v1).' },
   anon_key: { type: 'string', description: 'Supabase anon / publishable key (public by design). Never pass the service_role key.' },
-  project_id: { type: 'string', description: 'Firebase project id.' },
+  project_id: { type: 'string', description: 'Firebase project id, or the Appwrite project id when url is an Appwrite endpoint (or platform is appwrite).' },
   api_key: { type: 'string', description: 'Firebase Web API key (AIza…, public by design).' },
   emulator: { type: 'boolean', description: 'Test against the local Firebase Emulator Suite (default ports).' },
-  platform: { type: 'string', enum: ['supabase', 'firebase', 'pocketbase'], description: 'Force a backend (default: auto-detect).' },
+  platform: { type: 'string', enum: ['supabase', 'firebase', 'pocketbase', 'appwrite'], description: 'Force a backend (default: auto-detect).' },
   firestore_rules: { type: 'string', description: 'firestore.rules file, if it is not in source.' },
   storage_rules: { type: 'string', description: 'storage.rules file, if it is not in source.' },
   database_rules: { type: 'string', description: 'Realtime Database rules JSON, if it is not in source.' },
@@ -55,7 +55,7 @@ export const TOOLS = [
     name: 'accessprobe_plan',
     title: 'Show what accessprobe would test',
     description:
-      'Read-only. Works out which backend (Supabase, Firebase, PocketBase) and exactly which project / URL accessprobe_scan would touch. ' +
+      'Read-only. Works out which backend (Supabase, Firebase, PocketBase, Appwrite) and exactly which project / URL accessprobe_scan would touch. ' +
       'Nothing is written. Call this first and show the targets to the user before asking whether they own them.',
     inputSchema: { type: 'object', properties: TARGET_PROPS, additionalProperties: false },
     annotations: { readOnlyHint: true, openWorldHint: true },
@@ -64,17 +64,17 @@ export const TOOLS = [
     name: 'accessprobe_scan',
     title: 'Prove whether access rules hold',
     description:
-      'Tests Supabase RLS, Firebase Security Rules or PocketBase API rules with two real test users: A creates data, then B and an anonymous visitor ' +
+      'Tests Supabase RLS, Firebase Security Rules, PocketBase API rules or Appwrite permissions with two real test users: A creates data, then B and an anonymous visitor ' +
       'try to read, change, forge and delete it. Only proven leaks are reported as critical, each with evidence and a fix. ' +
       'It creates two test users and test rows/files in the target and removes the test data afterwards, so only run it on apps the user owns: ' +
       'show them the targets from accessprobe_plan, get a clear yes, then set owner_confirmed. Prefer a local or staging backend ' +
-      '(supabase start, the Firebase Emulator Suite, a local PocketBase) over production. Items in notes were NOT tested; never call them safe.',
+      '(supabase start, the Firebase Emulator Suite, a local PocketBase or Appwrite) over production. Items in notes were NOT tested; never call them safe.',
     inputSchema: { type: 'object', properties: SCAN_PROPS, required: ['owner_confirmed'], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
 ];
 
-const PROJECT_MARKERS = ['package.json', 'supabase', 'pb_migrations', 'firebase.json', 'firestore.rules', 'database.rules.json', 'pubspec.yaml', '.env', '.env.local'];
+const PROJECT_MARKERS = ['package.json', 'supabase', 'pb_migrations', 'appwrite.json', 'appwrite.config.json', 'firebase.json', 'firestore.rules', 'database.rules.json', 'pubspec.yaml', '.env', '.env.local'];
 
 // MCP arguments (snake_case) → the options scan() takes. Paths resolve against `directory`.
 export function toOptions(args = {}, cwd = process.cwd()) {
@@ -197,7 +197,7 @@ export function createServer({ write = (m) => process.stdout.write(`${JSON.strin
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: 'accessprobe', title: 'accessprobe', version: VERSION },
           instructions:
-            'accessprobe proves whether Supabase RLS, Firebase Security Rules and PocketBase API rules hold, using two real test users. ' +
+            'accessprobe proves whether Supabase RLS, Firebase Security Rules, PocketBase API rules and Appwrite permissions hold, using two real test users. ' +
             'Run it after changing tables, policies, rules or data access code. Always call accessprobe_plan first and ask the user to ' +
             'confirm they own the targets before accessprobe_scan.',
         });

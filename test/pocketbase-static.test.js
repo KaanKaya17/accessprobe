@@ -153,7 +153,8 @@ test('sign-up closed (users create rule superusers-only): a clear error, nothing
       assert.match(e.message, /--user-a email:password --user-b email:password/);
       return true;
     });
-    assert.deepEqual(seen.filter((s) => s !== 'GET /api/health'), ['POST /api/collections/users/records']);
+    // read-only detection probes (PocketBase's and Appwrite's health endpoints) aside
+    assert.deepEqual(seen.filter((s) => s !== 'GET /api/health' && s !== 'GET /v1/health/version'), ['POST /api/collections/users/records']);
   } finally {
     server.close();
   }

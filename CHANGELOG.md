@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Appwrite adapter** (`--platform appwrite`, or `--url <endpoint> --project-id <id>`; an endpoint is detected through the public `/v1/health/version`). Also detected from `--source`: `appwrite.json` / `appwrite.config.json`, or the Appwrite SDK with `setProject("…")`. It never asks for or uses API keys or console credentials: only `X-Appwrite-Project` and the test users' own sessions.
+  - Collections (attributes, `$permissions`, `documentSecurity`), TablesDB tables and buckets are read from `appwrite.json`. Without it, ids come from `databases.createDocument("db", "…")` / `tablesDB.createRow({ databaseId, tableId })` calls, env vars or `--table <database>/<collection>`, and attributes are guessed from Appwrite's answers.
+  - Two test users sign up through the Account API. A creates a document without explicit permissions (so the defaults apply), then B and an anonymous visitor try to read, list, modify, delete and create; B also tries to rewrite a document's `$permissions` to itself. Catches `read("any")` / `read("users")` on private data, collection-level `update("users")` / `delete("users")`, document security turned off and `create("any")`. Storage buckets get the same tests.
+  - A 404 or an empty list only counts as a pass when A's control read through the same endpoint shows the document unchanged.
+  - Test documents and files are deleted. Appwrite clients cannot delete their own account, so test users block themselves and the report lists them for deletion in the console.
+  - Fixes are Appwrite permission strings, the `appwrite.json` snippet when the project has one, and a `Permission` / `Role` SDK snippet.
+  - An Appwrite API key in a browser-exposed env var or in the site bundle is reported.
+- Unit tests against a mock Appwrite server that applies permissions the way the Appwrite docs describe.
+
+### Changed
+- `--project-id` with `--url` (and without `--api-key`), or with `--platform appwrite`, now means the Appwrite project; Firebase is no longer started for it. `--url` pointing at an Appwrite server is no longer assumed to be Supabase.
+
 ## [0.7.0] - 2026-11-22
 
 ### Added
