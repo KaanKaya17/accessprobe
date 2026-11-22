@@ -73,7 +73,7 @@ export async function setupUsers(client, { userA, userB, emailDomain = 'example.
         password = `Rp-${randomUUID()}`;
         const r = await client.signUp(email, password);
         if (r.status === 404 && /project/.test(errType(r))) throw fail(`Appwrite project "${client.projectId}" not found on ${client.url} (${msg(r.data)}). Check --project-id.`);
-        if (r.status === 429) throw fail(`Appwrite rate limit hit while signing up test user ${label} (${msg(r.data)}). Wait a while, or pass existing users with --user-a / --user-b.`);
+        if (r.rateLimited) throw fail(`Appwrite rate limit hit while signing up test user ${label} (${msg(r.data)}). Wait a while, or pass existing users with --user-a / --user-b.`);
         if (!ok(r)) {
           throw fail(
             `Sign-up of test user ${label} failed (${r.status}): ${msg(r.data)}\n` +

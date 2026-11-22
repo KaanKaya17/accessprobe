@@ -91,6 +91,9 @@ Common
   --pgtap <file.sql>     Supabase: also write the checks as pgTAP tests for
                          "supabase test db" (e.g. supabase/tests/accessprobe.test.sql).
                          Leaks found now fail until fixed; then they guard CI.
+  --sarif <file.sarif>   Also write the findings as SARIF 2.1.0 for GitHub code scanning
+                         (upload with github/codeql-action/upload-sarif). Each finding
+                         points at the policy / rule that leaks, found in --source.
   --json                 Print the raw result as JSON
   --yes                  Skip the "I own this app" confirmation (for CI)
   -q, --quiet            Less output
@@ -132,6 +135,7 @@ const OPTIONS = {
   bucket: { type: 'string', multiple: true },
   out: { type: 'string' },
   pgtap: { type: 'string' },
+  sarif: { type: 'string' },
   'rules-tests': { type: 'string' },
   json: { type: 'boolean' },
   yes: { type: 'boolean' },
@@ -270,6 +274,13 @@ try {
   if (v.out) {
     await writeFile(v.out, markdownReport(result), 'utf8');
     if (!v.json) console.log(`Report written to ${v.out}`);
+  }
+  if (v.sarif) {
+    const { makeLocator, sarifReport } = await import('../src/core/sarif.js');
+    const rulesFiles = [v['firestore-rules'], v['database-rules'], v['storage-rules'], ...(v.schema || [])];
+    const locate = await makeLocator({ source: v.source, extraFiles: rulesFiles });
+    await writeFile(v.sarif, JSON.stringify(sarifReport(result, locate), null, 2), 'utf8');
+    console.error(`SARIF written to ${v.sarif} (${result.findings.length} result(s))`);
   }
   if (v.pgtap) {
     const { writePgtap } = await import('../src/providers/supabase/pgtap.js');

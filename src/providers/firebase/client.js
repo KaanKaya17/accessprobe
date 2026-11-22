@@ -3,6 +3,7 @@
 
 // emulator: { auth, firestore, database, storage } base URLs, e.g. "http://127.0.0.1:9099"
 import { readOnlyBlock } from '../../core/read-only.js';
+import { fetchRetry, throttled, RATE_LIMITED } from '../../core/http.js';
 
 export const DEFAULT_EMULATOR = {
   auth: 'http://127.0.0.1:9099',
@@ -62,11 +63,15 @@ export class FirebaseClient {
     let res;
     let text;
     try {
-      res = await fetch(url, { method, headers: h, body: payload, signal: AbortSignal.timeout(this.timeoutMs) });
+      res = await fetchRetry(url, { method, headers: h, body: payload }, { timeoutMs: this.timeoutMs });
       text = await res.text();
     } catch (e) {
       // network error / timeout / bad URL: inconclusive (status 0), never a crash and never a PASS
       return { ok: false, status: 0, data: { error: `network error: ${e.cause?.code || e.name || e.message}` }, evidence: `${method} ${shown} → network error` };
+    }
+    if (throttled(res)) {
+      // still throttled after the retries: inconclusive, never "refused"
+      return { ok: false, status: 0, rateLimited: true, data: { error: RATE_LIMITED }, evidence: `${method} ${shown} → ${res.status} (rate limited)` };
     }
     let data = text;
     try {

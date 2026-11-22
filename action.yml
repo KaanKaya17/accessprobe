@@ -21,6 +21,12 @@ inputs:
     description: Where to write the Markdown report (relative to working-directory).
     required: false
     default: accessprobe-report.md
+  sarif:
+    description: >
+      Also write a SARIF file at this path (e.g. accessprobe.sarif) for GitHub code scanning. Upload it with
+      github/codeql-action/upload-sarif (needs permissions: security-events: write). Empty = no SARIF.
+    required: false
+    default: ''
   fail-on:
     description: '"critical" (default) fails the step on a proven critical leak or when nothing could be tested; "never" only warns.'
     required: false
@@ -37,6 +43,9 @@ outputs:
   report:
     description: Path of the Markdown report.
     value: ${{ steps.run.outputs.report }}
+  sarif:
+    description: Path of the SARIF file (empty when the sarif input is not set).
+    value: ${{ steps.run.outputs.sarif }}
 
 runs:
   using: composite
@@ -49,6 +58,7 @@ runs:
         AP_ARGS: ${{ inputs.args }}
         AP_REPORT: ${{ inputs.report }}
         AP_FAIL_ON: ${{ inputs.fail-on }}
+        AP_SARIF: ${{ inputs.sarif }}
         AP_SUMMARY: ${{ inputs.summary }}
       run: |
         if ! node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 20 ? 0 : 1)"; then
@@ -58,11 +68,14 @@ runs:
         set +e
         # word splitting of AP_ARGS is intended: it holds several CLI arguments
         # shellcheck disable=SC2086
-        node "$AP_BIN" --yes --out "$AP_REPORT" $AP_ARGS
+        sarif_args=()
+        if [ -n "$AP_SARIF" ]; then sarif_args=(--sarif "$AP_SARIF"); fi
+        node "$AP_BIN" --yes --out "$AP_REPORT" "${sarif_args[@]}" $AP_ARGS
         code=$?
         set -e
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
         echo "report=$AP_REPORT" >> "$GITHUB_OUTPUT"
+        echo "sarif=$AP_SARIF" >> "$GITHUB_OUTPUT"
         if [ "$AP_SUMMARY" = "true" ] && [ -f "$AP_REPORT" ]; then cat "$AP_REPORT" >> "$GITHUB_STEP_SUMMARY"; fi
         case "$code" in
           0) echo "::notice::accessprobe: no critical findings." ;;

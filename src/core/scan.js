@@ -80,6 +80,25 @@ function merge(opts, site, results, failures, t0) {
     for (const x of r.notes) if (!notes.includes(pre + x)) notes.push(pre + x);
   }
 
+  // one clear line instead of one "… inconclusive (0 rate limited …)" per check
+  const throttled = new Map(); // resource → checks
+  let throttledCount = 0;
+  for (let i = notes.length - 1; i >= 0; i--) {
+    if (!notes[i].includes('rate limited (HTTP 429')) continue;
+    const m = notes[i].match(/^(.+?): (.+?) (?:test|check)\b/);
+    const [res, check] = m ? [m[1], m[2]] : [notes[i].split(' (')[0], null];
+    if (!throttled.has(res)) throttled.set(res, new Set());
+    if (check) throttled.get(res).add(check);
+    throttledCount++;
+    notes.splice(i, 1);
+  }
+  if (throttledCount) {
+    const list = [...throttled].reverse().map(([res, checks]) => (checks.size ? `${res} (${[...checks].join(', ')})` : res));
+    notes.unshift(
+      `Rate limited: the backend answered HTTP 429 for ${throttledCount} check(s) even after retrying. They were not tested and are not counted as passed: ${list.join('; ')}. ` +
+        'Run again in a few minutes, or with --only <table> to send fewer requests.',
+    );
+  }
   if (opts.readOnly) {
     // one line instead of one "write test skipped … not sent (--read-only)" per table
     const skippedWrites = [];

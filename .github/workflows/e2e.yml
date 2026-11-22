@@ -33,12 +33,17 @@ jobs:
       - name: accessprobe against real Postgres
         run: |
           set +e
-          node bin/accessprobe.js --url "$SB_URL" --anon-key "$SB_ANON" --source test/supabase-local --yes --json             --pgtap test/supabase-local/supabase/tests/accessprobe.test.sql > result.json
+          node bin/accessprobe.js --url "$SB_URL" --anon-key "$SB_ANON" --source test/supabase-local --yes --json             --pgtap test/supabase-local/supabase/tests/accessprobe.test.sql --sarif accessprobe.sarif > result.json
           code=$?
           set -e
           echo "exit code $code (1 expected: the fixture has critical leaks)"
           [ "$code" = 1 ] || { cat result.json; exit 1; }
           node test/supabase-local/check.mjs result.json
+      - name: SARIF output is valid SARIF 2.1.0 and points into the migrations
+        run: |
+          curl -sfL https://json.schemastore.org/sarif-2.1.0.json -o sarif-schema.json
+          pipx run check-jsonschema --schemafile sarif-schema.json accessprobe.sarif
+          node test/supabase-local/check-sarif.mjs accessprobe.sarif result.json
       - name: --read-only changes nothing in the database
         run: |
           for u in ro-a ro-b; do
@@ -76,11 +81,14 @@ jobs:
         with:
           args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source test/supabase-local --quiet
           fail-on: never
+          sarif: accessprobe-action.sarif
       - name: Action outputs
         run: |
           test "${{ steps.action.outputs.exit-code }}" = 1
           test -s "${{ steps.action.outputs.report }}"
           grep -q "security_invoker = true" "${{ steps.action.outputs.report }}"
+          test "${{ steps.action.outputs.sarif }}" = accessprobe-action.sarif
+          node -e 'const s=JSON.parse(require("fs").readFileSync("accessprobe-action.sarif","utf8")); if(!s.runs[0].results.length) throw new Error("empty SARIF")'
           echo "Action reported exit code 1 and wrote the report."
 
   firebase-action:
