@@ -658,18 +658,33 @@ export async function probeStorage(client, [A, B], { extraBuckets = [], log }) {
   return { findings, passed, skipped, count: names.size };
 }
 
-export function rpcReview(schema) {
+// Functions the migrations show to be safe (they check the caller, or anonymous visitors can't
+// execute them) need no review; the rest are listed. Without migrations every function is listed.
+export function rpcReview(schema, passed = []) {
   if (!schema.rpcs.length) return [];
+  const defs = schema.functions || new Map();
+  const safe = (r) => {
+    const d = defs.get(r);
+    return Boolean(d) && !d.trigger && (d.checksAuth || !d.anon);
+  };
+  const review = schema.rpcs.filter((r) => !safe(r));
+  const ok = schema.rpcs.filter(safe);
+  if (ok.length) {
+    const why = (d) => (d.checksAuth ? `checks the caller${d.authVia ? ` via ${d.authVia}()` : ''}` : 'is not executable by anonymous visitors');
+    passed.push(`Functions: ${ok.map((r) => `${r}() ${why(defs.get(r))}`).join('; ')} (from the migrations)`);
+  }
+  if (!review.length) return [];
   return [
     {
       id: 'rpc-review',
       severity: 'info',
-      title: `${schema.rpcs.length} database function(s) are callable over the API`,
+      title: `${review.length} database function(s) are callable over the API${ok.length ? ' and need a look' : ''}`,
       detail:
-        'accessprobe does not call them (they may have side effects). SECURITY DEFINER functions skip RLS — make sure each one checks auth.uid() itself, or revoke execute from anon.',
-      evidence: schema.rpcs.map((r) => `POST /rest/v1/rpc/${r}`).join(', '),
+        (defs.size ? 'The migrations do not show these checking the caller. ' : 'There were no migrations to read them from (pass --source). ') +
+        'accessprobe only calls them with GET (read-only, no arguments). SECURITY DEFINER functions skip RLS: make sure each one checks auth.uid() itself, or revoke execute from anon.',
+      evidence: review.map((r) => `POST /rest/v1/rpc/${r}`).join(', '),
       fix: {
-        sql: schema.rpcs.map((r) => `-- if "${r}" should not be public:\nrevoke execute on function public.${r} from anon;`).join('\n'),
+        sql: review.map((r) => `-- if "${r}" should not be public:\nrevoke execute on function public.${r} from anon;`).join('\n'),
       },
     },
   ];

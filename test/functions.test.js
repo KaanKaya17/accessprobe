@@ -126,3 +126,27 @@ create function public.my_current_user_id_copy() returns int language sql securi
   assert.equal(d.get('my_current_user_id_copy').checksAuth, false, 'a name containing the helper is not a call');
   assert.ok(!definerFindings(d).some((f) => f.id === 'definer-no-auth-check' && f.resource !== 'my_current_user_id_copy'));
 });
+
+test('rpcReview: functions the migrations show to be safe are a passed check, the rest are listed', async () => {
+  const { rpcReview } = await import('../src/providers/supabase/probes.js');
+  const functions = parseFunctions([
+    {
+      file: 'x.sql',
+      text: `create function public.me() returns uuid language sql stable security definer set search_path = '' as $$ select auth.uid() $$;
+create function public.quota(n int default 1) returns boolean language sql security definer set search_path = '' as $$ select public.me() is not null $$;
+create function public.internal() returns void language sql security definer set search_path = '' as $$ select 1 $$;
+revoke all on function public.internal() from public, anon;
+create function public.open_one() returns int language sql security definer set search_path = '' as $$ select 1 $$;`,
+    },
+  ]);
+  const passed = [];
+  const f = rpcReview({ rpcs: ['me', 'quota', 'internal', 'open_one', 'unknown_fn'], functions }, passed);
+  assert.equal(f.length, 1);
+  assert.match(f[0].evidence, /open_one/);
+  assert.match(f[0].evidence, /unknown_fn/);
+  assert.doesNotMatch(f[0].evidence, /\bme\b|quota|internal/);
+  assert.match(passed[0], /quota\(\) checks the caller via me\(\)/);
+  assert.match(passed[0], /internal\(\) is not executable by anonymous visitors/);
+  // no migrations: everything is listed, as before
+  assert.match(rpcReview({ rpcs: ['me'] })[0].detail, /pass --source/);
+});

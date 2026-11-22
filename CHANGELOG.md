@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-11-22
+
+### Changed
+- Supabase `rpc-review` (info) only lists functions the migrations do not show to be safe. A function that checks the caller (`auth.uid()`, directly or through a helper) or that anonymous visitors cannot execute becomes a passed check that says why. On a real app this turned its only remaining note into a pass. Without migrations every function is listed, as before.
+- "No supported backend found" names the folder it looked in. A run from the wrong folder (PowerShell 5 has no `&&`, so `cd x && npx accessprobe` stays in the old folder) now says so.
+
 ## [0.14.0] - 2026-11-22
 
 Found by preparing a run on a real Supabase fitness app (its migrations), running 0.13.0 on a real Firebase game, and on a new multi-tenant app built from scratch (a five-a-side squad app: groups, matches, line-ups, anonymous ratings).
