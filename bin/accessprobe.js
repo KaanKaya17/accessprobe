@@ -13,6 +13,7 @@ accessprobe — prove your backend's access rules actually work (Supabase, Fireb
 Usage
   npx accessprobe                  test the project in this folder (finds the config itself)
   npx accessprobe setup-agent      teach Claude Code / Codex / Cursor in this project to use accessprobe
+  npx accessprobe mcp              run as an MCP server (stdio) for coding agents
   npx accessprobe --site https://your-app.com --source .
   npx accessprobe --url https://xyz.supabase.co --anon-key eyJ... --source .
   npx accessprobe --project-id my-app --api-key AIza... --source .
@@ -106,7 +107,11 @@ try {
   process.exit(2);
 }
 
-if (positionals[0] === 'setup-agent') {
+if (positionals[0] === 'mcp') {
+  const { serveStdio } = await import('../src/mcp/server.js');
+  serveStdio();
+  await new Promise(() => {}); // the server exits itself when stdin closes
+} else if (positionals[0] === 'setup-agent') {
   const { setupAgent } = await import('../src/core/setup-agent.js');
   for (const line of await setupAgent(process.cwd(), { force: v.force })) console.log(`  ✔ ${line}`);
   console.log('\nYour coding agent can now run accessprobe. Try asking it: "check my database rules with accessprobe".');

@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-22
+
+### Added
+- **MCP server** (`npx accessprobe mcp`, stdio, no dependencies). Coding agents such as Claude Code, Cursor and Codex can call accessprobe as a tool after they change tables, policies or rules.
+  - `accessprobe_plan` (read-only) shows which backend and exactly which project or URL would be tested.
+  - `accessprobe_scan` returns the Markdown report with evidence and fixes, plus a structured summary (`grade`, `exitCode`, `findings` with `fix`, `passed`, `notes`). It refuses to run unless `owner_confirmed` is true, which agents are told to set only after the user confirms the targets from the plan. Scans run one at a time.
+  - Setup for Claude Code: `claude mcp add accessprobe -- npx -y accessprobe mcp`.
+
 ## [0.5.0] - 2026-11-21
 
 ### Added

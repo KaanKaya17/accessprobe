@@ -62,6 +62,39 @@ The skill tells the agent to:
   read your app depends on breaks the app for every user;
 - test the fix locally (Firebase Emulator Suite or a Supabase branch), and **ask you before deploying**.
 
+### As an MCP server
+
+accessprobe also runs as an [MCP](https://modelcontextprotocol.io) server, so an agent can call it as a
+tool after it changes tables, policies or rules:
+
+```bash
+# Claude Code
+claude mcp add accessprobe -- npx -y accessprobe mcp
+```
+
+Cursor (`.cursor/mcp.json`), Windsurf, VS Code and other clients take the same command:
+
+```json
+{ "mcpServers": { "accessprobe": { "command": "npx", "args": ["-y", "accessprobe", "mcp"] } } }
+```
+
+Codex (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.accessprobe]
+command = "npx"
+args = ["-y", "accessprobe", "mcp"]
+```
+
+It has two tools:
+
+- `accessprobe_plan` is read-only. It shows which backend and exactly which project or URL would be tested.
+- `accessprobe_scan` runs the test and returns the report with evidence and fixes, plus a structured
+  summary (`grade`, `exitCode`, `findings`, `notes`). It only runs with `owner_confirmed: true`, which
+  the agent is told to set only after you confirm you own the targets shown by the plan.
+
+The server runs in your project folder by default; pass `directory` to test another one.
+
 ## What it tests
 
 **Supabase**
@@ -201,7 +234,7 @@ jobs:
           eval "$(supabase status -o env)"
           echo "SB_URL=$API_URL" >> "$GITHUB_ENV"
           echo "SB_ANON=${ANON_KEY:-$PUBLISHABLE_KEY}" >> "$GITHUB_ENV"
-      - uses: KaanKaya17/accessprobe@v0.5.0
+      - uses: KaanKaya17/accessprobe@v0.6.0
         with:
           args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source .
 ```
@@ -213,7 +246,7 @@ jobs:
         with: { distribution: temurin, java-version: '21' }
       - run: npx firebase-tools emulators:start --only auth,firestore,database,storage --project demo-ci &
       - run: npx wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099
-      - uses: KaanKaya17/accessprobe@v0.5.0
+      - uses: KaanKaya17/accessprobe@v0.6.0
         with:
           args: --project-id demo-ci --api-key fake --source . --emulator
 ```
@@ -261,7 +294,7 @@ project. It asks you to confirm ownership before every run unless you pass `--ye
 - [x] Zero-config runs (`npx accessprobe` in a project folder)
 - [x] GitHub Action: attack your rules on every pull request (local Supabase / Firebase emulators)
 - [ ] Turn findings into permanent pgTAP regression tests
-- [ ] MCP server: agents run it after every schema change
+- [x] MCP server: agents run it after every schema change (`npx accessprobe mcp`)
 - [ ] Edge Function checks (auth required? cross-user IDs?)
 - [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)
 - [x] Privilege escalation (users editing their own `role` / `plan`) and views that skip RLS
