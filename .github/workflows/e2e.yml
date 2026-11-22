@@ -124,8 +124,8 @@ jobs:
             --http-port=80 --https-port=443 --interactive=N --no-start=true
           cd "$RUNNER_TEMP/aw/appwrite"
           ls -la
-          # the test signs up several users per minute: no abuse rate limits
-          if grep -q '^_APP_OPTIONS_ABUSE=' .env; then sed -i 's/^_APP_OPTIONS_ABUSE=.*/_APP_OPTIONS_ABUSE=disabled/' .env; else echo '_APP_OPTIONS_ABUSE=disabled' >> .env; fi
+          # the test signs up several users per minute: no abuse rate limits (files are root-owned)
+          if grep -q '^_APP_OPTIONS_ABUSE=' .env; then sudo sed -i 's/^_APP_OPTIONS_ABUSE=.*/_APP_OPTIONS_ABUSE=disabled/' .env; else echo '_APP_OPTIONS_ABUSE=disabled' | sudo tee -a .env; fi
           grep -E '^_APP_(OPTIONS_ABUSE|CONSOLE_WHITELIST|DOMAIN|ENV)' .env || true
           docker compose up -d --quiet-pull
       - name: Wait for /v1/health/version
