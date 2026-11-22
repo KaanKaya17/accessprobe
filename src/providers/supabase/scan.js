@@ -11,6 +11,7 @@ import { scanSource, sourceToDefinitions } from './source.js';
 import { setupUsers, resolveIdentities, probeTables, probeStorage, rpcReview, cleanupRows, msg } from './probes.js';
 import { parseFunctions, probeFunctions, definerFindings } from './functions.js';
 import { probeGraphql } from './graphql.js';
+import { probeTenants } from './tenants.js';
 
 const CLEANUP_RPC_HINT = /^(delete_(my_)?(own_)?(account|user|profile)|delete_me)$/i;
 
@@ -116,6 +117,24 @@ export async function scan(opts, { site, log }) {
     findings.push(...tables.findings);
     passed.push(...tables.passed);
 
+    const tenantSkipped = [];
+    log('→ Testing organizations / teams');
+    const ten = await probeTenants(client, schema, users, { log, findings, passed, skipped: tenantSkipped, readOnly: opts.readOnly });
+    if (ten?.tested) {
+      // the per-user table tests can't fill org_id; the organization tests above covered these tables
+      const covered = new Set([ten.members.name, ...ten.scoped.map((t) => t.name)]);
+      const noise = /cannot fill|not proven/;
+      tables.skipped = tables.skipped.filter((n) => !(covered.has(n.split(':')[0]) && noise.test(n)));
+      for (let i = 0; i < notes.length; i++) {
+        if (!notes[i].startsWith('No owner column detected for: ')) continue;
+        const [head, rest] = notes[i].split(' (looked for');
+        const left = head.replace('No owner column detected for: ', '').split(', ').filter((n) => !covered.has(n));
+        if (left.length) notes[i] = `No owner column detected for: ${left.join(', ')} (looked for${rest}`;
+        else notes.splice(i--, 1);
+      }
+      notes.push(`Organizations: tested ${ten.tenant.name} with members in ${ten.members.name}.${ten.col}${ten.roleCol ? ` (role: ${ten.roleCol})` : ''} and ${ten.scoped.length} table(s) scoped by ${ten.col}, as an outsider, a member and a removed member.`);
+    }
+
     log('→ Testing storage');
     const storage = await probeStorage(client, users, { extraBuckets: opts.buckets || [], log });
     findings.push(...storage.findings);
@@ -130,7 +149,7 @@ export async function scan(opts, { site, log }) {
 
     await probeGraphql(client, { findings, passed, skipped: fnSkipped, only: opts.only });
 
-    notes.push(...tables.skipped, ...storage.skipped, ...fnSkipped);
+    notes.push(...tables.skipped, ...tenantSkipped, ...storage.skipped, ...fnSkipped);
     findings.push(...rpcReview(schema));
 
     const hint = schema.rpcs.find((r) => CLEANUP_RPC_HINT.test(r));

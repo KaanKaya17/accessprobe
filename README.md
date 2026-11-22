@@ -103,6 +103,7 @@ The server runs in your project folder by default; pass `directory` to test anot
 |---|---|
 | Site bundle | Supabase URL + anon key discovery; leaked `service_role` / `sb_secret_` / Stripe / OpenAI / AWS keys |
 | Tables | anonymous read, anonymous write (RLS off), **B reads A's row**, **B updates A's row**, **B takes A's row over** (sets the owner to itself), **B deletes A's row**, **B inserts a row as A**, **users make themselves admin** (change `role`, `is_admin`, `plan`, `credits`… on their own row; the old value is put back) |
+| Organizations / teams | found from the schema: the tenant table (`orgs`, `teams`, `workspaces` …), the membership table (`org_members (org_id, user_id, role)`) and every table scoped by the same `org_id`. A creates a test organization, becomes its owner and writes a row into each scoped table. **B as an outsider** reads, changes and deletes those rows, lists the members and **adds itself to A's organization** (as owner, then as member). **B as a plain member** tries to **raise its own role** to admin / owner. **B after being removed** reads the rows again with its member session: policies that trust JWT claims (`app_metadata`) keep removed members in until the token refreshes. Fixes use `is_member_of()` / `is_admin_of()` helpers |
 | Views | **views that skip RLS**: B (and anonymous visitors) look for A's private test rows in every view. Views without `security_invoker` run with the owner's rights |
 | Storage | anonymous listing, **B downloads A's file**, **B deletes A's file**, public buckets via their public URL |
 | Project config | secret keys in browser-exposed env vars (`VITE_`, `NEXT_PUBLIC_`, `EXPO_PUBLIC_` …) or in client code |
@@ -378,7 +379,7 @@ jobs:
           eval "$(supabase status -o env)"
           echo "SB_URL=$API_URL" >> "$GITHUB_ENV"
           echo "SB_ANON=${ANON_KEY:-$PUBLISHABLE_KEY}" >> "$GITHUB_ENV"
-      - uses: KaanKaya17/accessprobe@v0.12.0
+      - uses: KaanKaya17/accessprobe@v0.13.0
         with:
           args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source .
 ```
@@ -390,7 +391,7 @@ jobs:
         with: { distribution: temurin, java-version: '21' }
       - run: npx firebase-tools emulators:start --only auth,firestore,database,storage --project demo-ci &
       - run: npx wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099
-      - uses: KaanKaya17/accessprobe@v0.12.0
+      - uses: KaanKaya17/accessprobe@v0.13.0
         with:
           args: --project-id demo-ci --api-key fake --source . --emulator
 ```
@@ -407,7 +408,7 @@ Set `sarif:` and upload the file. Each finding then shows up under **Security �
       security-events: write
     steps:
       # … start the backend as above …
-      - uses: KaanKaya17/accessprobe@v0.12.0
+      - uses: KaanKaya17/accessprobe@v0.13.0
         with:
           args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source .
           sarif: accessprobe.sarif
@@ -470,7 +471,8 @@ project (unless you pass `--read-only`). It asks you to confirm ownership before
 - [x] MCP server: agents run it after every schema change (`npx accessprobe mcp`)
 - [x] `--read-only` for production, and `.accessprobeignore` for things that are open on purpose
 - [x] SARIF output for GitHub code scanning (`--sarif`), findings placed on the leaking policy / rule
-- [ ] Team / organization roles (other org, member vs admin, removed member)
+- [x] Team / organization roles: outsider, self-join, member raising its role, removed member (Supabase)
+- [ ] Organization roles for Firebase, PocketBase and Appwrite (Teams)
 - [x] Sensitive columns in readable rows, `SECURITY DEFINER` functions (proven through GET, plus a static check), `pg_graphql` schema exposure
 - [ ] Edge Function checks (auth required? cross-user IDs?)
 - [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)

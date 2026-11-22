@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-22
+
+### Added (Supabase)
+- **Organizations / teams.** Multi-tenant rules are tested automatically when the schema has a tenant table (`orgs`, `organizations`, `teams`, `workspaces`, `tenants`, `companies` …), a membership table with a user column and the tenant column (`org_members (org_id, user_id, role)`, found by foreign key or name) and tables scoped by the same column. A creates a test organization, makes itself owner (unless a trigger already did) and writes a row into every scoped table. Then:
+  - **outsider** (B, not a member): `cross-tenant-read` / `-update` / `-delete` on the scoped rows, `cross-tenant-members-read` (warning) on the member list, and `tenant-self-join`: B inserts a membership for itself into A's organization, as owner or admin first, then as a plain member;
+  - **member** (A adds B with a member role, B signs in again so JWT claims are current): `tenant-role-escalation` when B can set its own role to owner / admin (the old role is put back);
+  - **removed member** (A removes B; B keeps that session): `removed-member-access` when B can still read the organization's rows. That is what policies built on JWT claims (`app_metadata`) do until the token is refreshed. Tables already open to outsiders are not reported twice.
+  - Fixes are policies built on `is_member_of()` / `is_admin_of()` SECURITY DEFINER helpers (no policy recursion on the members table), an admin-only insert policy for memberships, and no self-service role updates.
+  - Test organizations, memberships and rows are deleted at the end (children first). The per-user notes that could not fill `org_id` for those tables are replaced by one "Organizations: tested …" note. Skipped under `--read-only`.
+- e2e (real Postgres): a second fixture migration with `orgs`, `org_members` (self-service role update bug), `projects` (correct), `invoices` (readable by everyone) and `org_files` (trusts a JWT claim kept in sync by a trigger). CI checks every verdict.
+
 ## [0.12.0] - 2026-11-22
 
 ### Added (Supabase)
