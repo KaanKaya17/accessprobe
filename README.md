@@ -20,6 +20,17 @@ cd your-app
 npx accessprobe
 ```
 
+Works on Linux, macOS and Windows with Node.js 20 or newer, with no other dependencies. Every pull request runs the full test suite on all three.
+
+<details><summary>Windows PowerShell</summary>
+
+- Run the two lines one by one. Windows PowerShell 5 has no `&&`, so `cd your-app && npx accessprobe` stays in the old folder.
+- You can also skip `cd` and pass the folder: `npx accessprobe --source C:\path\to\your-app`.
+- Multi-line examples below end lines with `\`. In PowerShell, use a backtick `` ` `` instead, or put everything on one line.
+- Put `email:password` in single quotes (`--user-a 'a@test.dev:p@ss!'`) so PowerShell leaves `@`, `$` and `!` alone.
+
+</details>
+
 That's it. accessprobe finds your Supabase, Firebase, PocketBase or Appwrite config in `.env`, `local.properties`,
 `google-services.json`, `pb_migrations/`, `appwrite.json` or your code, using only the public key an attacker would also see. Then it
 reads your migrations or rules and runs the tests. Add `--site https://your-app.com` to also check
