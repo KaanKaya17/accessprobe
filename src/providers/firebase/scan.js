@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { FirebaseClient, DEFAULT_EMULATOR } from './client.js';
 import { extract } from './discover.js';
 import { scanSource } from './source.js';
-import { setupUsers, deleteUsers, probeFirestore } from './probes.js';
+import { setupUsers, deleteUsers, setupAnonAuth, probeFirestore } from './probes.js';
 import { probeRtdb, probeStorage } from './rtdb-storage.js';
 import { ownsProjectId as appwriteOwnsProjectId } from '../appwrite/scan.js';
 
@@ -103,17 +103,23 @@ export async function scan(opts, { site, log }) {
   // 2. users
   log(`→ Signing in two test users (A and B) on Firebase project "${cfg.projectId}"`);
   const users = await setupUsers(client, { userA: opts.userA, userB: opts.userB, emailDomain: opts.emailDomain, log });
+  let anonC = null; // anonymous-auth user C, when the project allows anonymous sign-in
 
   try {
+    const anonAuth = await setupAnonAuth(client, users, { log });
+    anonC = anonAuth.user;
+    passed.push(...anonAuth.passed);
+    notes.push(...anonAuth.notes);
+    const actors = [...users, anonC];
     log('→ Testing Firestore');
-    const fs = await probeFirestore(client, src, users, { log });
+    const fs = await probeFirestore(client, src, actors, { log });
     log('→ Testing Realtime Database');
-    const db = await probeRtdb(client, src, users, { log });
+    const db = await probeRtdb(client, src, actors, { log });
     log('→ Testing Storage');
-    const st = await probeStorage(client, src, users, { log });
+    const st = await probeStorage(client, src, actors, { log });
 
     // test users' ids are noise in a report: show who, not which uid
-    const anon = (x) => users.reduce((t, u) => t.split(u.id).join(`<user ${u.label} id>`), x);
+    const anon = (x) => [...users, anonC].filter(Boolean).reduce((t, u) => t.split(u.id).join(`<user ${u.label} id>`), x);
     for (const part of [fs, db, st]) {
       findings.push(...part.findings.map((f) => ({ ...f, evidence: anon(f.evidence) })));
       passed.push(...part.passed);
@@ -128,6 +134,8 @@ export async function scan(opts, { site, log }) {
       findings,
       passed,
       notes,
+      // Security Rules regression recipes, used by --rules-tests (rules-tests.js)
+      recipes: [...fs.recipes, ...db.recipes, ...st.recipes].map((r) => ({ ...r, projectId: cfg.projectId })),
       stats: {
         resources,
         resourceLabel: 'paths',
@@ -141,6 +149,7 @@ export async function scan(opts, { site, log }) {
       },
     };
   } finally {
+    if (anonC) await deleteUsers(client, [anonC], notes);
     await deleteUsers(client, users, notes); // Firebase users can delete themselves
   }
 }

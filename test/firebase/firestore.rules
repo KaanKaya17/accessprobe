@@ -47,6 +47,23 @@ service cloud.firestore {
       allow delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
     }
 
+    // ANONYMOUS AUTH LEAK: private entries behind "request.auth != null" only. Unauthenticated
+    // visitors are refused, but anyone can sign in anonymously and read them.
+    match /journal/{id} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    }
+
+    // CORRECT for anonymous auth: readable by every signed-in user (so B's read is still reported),
+    // but not by anonymous ones.
+    match /team_wiki/{id} {
+      allow read: if request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous';
+      allow create: if request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    }
+
     // CORRECT: per-user private subcollection.
     match /users/{uid}/private/{doc} {
       allow read, write: if request.auth != null && request.auth.uid == uid;

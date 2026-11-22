@@ -101,6 +101,45 @@ jobs:
       - if: failure()
         run: cat test/firebase/emulators.log | tail -50
 
+  firebase-rules-tests:
+    # --rules-tests: the generated Security Rules tests run the way the README says (firebase
+    # emulators:exec + node --test, @firebase/rules-unit-testing installed by the "user"), and
+    # exactly the tests for leaks accessprobe proved fail.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: accessprobe against the emulators writes the rules tests
+        working-directory: test/firebase
+        run: |
+          RT="$RUNNER_TEMP/rt"
+          echo "RT=$RT" >> "$GITHUB_ENV"
+          export RT
+          mkdir -p "$RT"
+          npx --yes firebase-tools@15.35.0 emulators:exec --only auth,firestore,database,storage --project demo-ci \
+            'node "$GITHUB_WORKSPACE/bin/accessprobe.js" --project-id demo-ci --api-key fake --source . --emulator --yes --quiet --rules-tests "$RT/accessprobe.rules.test.mjs"; echo $? > "$RT/code"'
+          echo "accessprobe exit code $(cat "$RT/code") (1 expected: the fixture has critical leaks)"
+          test "$(cat "$RT/code")" = 1
+          head -20 "$RT/accessprobe.rules.test.mjs"
+      - name: Install @firebase/rules-unit-testing (pinned) next to the generated file
+        working-directory: ${{ env.RT }}
+        run: |
+          npm init -y > /dev/null
+          npm i --no-audit --no-fund @firebase/rules-unit-testing@6.0.0 firebase@13.2.0
+      - name: Generated rules tests fail exactly where accessprobe proved a leak
+        working-directory: test/firebase
+        run: |
+          npx --yes firebase-tools@15.35.0 emulators:exec --only firestore,database,storage --project demo-ci \
+            'node --test --test-reporter=tap "$RT/accessprobe.rules.test.mjs" > "$RT/tap.txt" 2>&1; true'
+          node check-rules-tests.mjs "$RT/accessprobe.rules.test.mjs" "$RT/tap.txt"
+
   real-appwrite:
     # A real self-hosted Appwrite (pinned) with the fixture's appwrite.json: broken and correct
     # collections, a TablesDB table and buckets. setup.mjs uses a server key for FIXTURE SETUP

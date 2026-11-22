@@ -52,6 +52,7 @@ test('--json prints machine-readable result and exits 1 on critical findings', a
   assert.equal(j.grade, 'F');
   assert.ok(j.findings.length > 0);
   assert.ok(!('recipes' in j), 'internal pgTAP recipes stay out of --json');
+  assert.ok(!('rulesRecipes' in j), 'internal rules-test recipes stay out of --json');
   assert.ok(!r.out.includes(ANON_KEY), 'keys never appear in output');
 });
 

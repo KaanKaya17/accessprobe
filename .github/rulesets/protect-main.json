@@ -67,6 +67,9 @@
             "context": "firebase-action"
           },
           {
+            "context": "firebase-rules-tests"
+          },
+          {
             "context": "real-appwrite"
           }
         ]

@@ -80,6 +80,35 @@ export async function deleteUsers(client, users, notes) {
   }
 }
 
+// Anonymous sign-in: when the provider is on, anyone gets a Firebase ID token for free (one POST
+// to accounts:signUp with no email), and that token passes "request.auth != null". User C plays
+// that visitor. Returns { user, passed, notes }; user is null when C can't (or needn't) exist.
+export async function setupAnonAuth(client, users, { log }) {
+  if (users.some((u) => u.email?.startsWith('(anonymous'))) {
+    return { user: null, passed: [], notes: ["Anonymous sign-in: test users A and B are anonymous accounts (email sign-up is off), so B's results already cover anonymous users"] };
+  }
+  const r = await client.signUp(null, null);
+  if (ok(r) && r.data?.idToken) {
+    log('  anonymous sign-in is enabled: created anonymous-auth user C');
+    return { user: { label: 'C', email: '(anonymous-auth user C)', id: r.data.localId, token: r.data.idToken, created: true }, passed: [], notes: [] };
+  }
+  if (/OPERATION_NOT_ALLOWED|ADMIN_ONLY_OPERATION/.test(msg(r.data))) return { user: null, passed: ['Anonymous sign-in is disabled'], notes: [] };
+  return { user: null, passed: [], notes: [`Anonymous sign-in: could not tell whether it is enabled (${r.status} ${msg(r.data)}), so the anonymous-auth checks were skipped`] };
+}
+
+export const ANON_AUTH_DETAIL =
+  'Anonymous sign-in is enabled on this project, so anyone can get a Firebase ID token without an account (one POST to accounts:signUp). ' +
+  'Unauthenticated requests were refused, but "request.auth != null" is true for anonymous users too, so this is effectively public.';
+
+// Recipes for --rules-tests (see rules-tests.js): run ids and markers are replaced by
+// placeholders ({A}, {marker}) so the generated file never contains live values.
+export function scrub(v, A, marker) {
+  if (typeof v === 'string') return v.split(A.id).join('{A}').split(marker).join('{marker}');
+  if (Array.isArray(v)) return v.map((x) => scrub(x, A, marker));
+  if (v && typeof v === 'object' && !(v instanceof Date)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, scrub(x, A, marker)]));
+  return v;
+}
+
 // ---------------------------------------------------------------- Firestore
 
 // Build the list of collections to test from rules + code.
@@ -106,8 +135,9 @@ function fillPath(t, user) {
   return t.collectionPath.replace(/\{(\w+)\}/g, (_, v) => (v === t.ownerPathVar ? user.id : `accessprobe-${v}`));
 }
 
-export async function probeFirestore(client, src, [A, B], { log }) {
+export async function probeFirestore(client, src, [A, B, C], { log }) {
   const findings = [];
+  const recipes = []; // checks with a clear verdict, replayed by --rules-tests
   const passed = [];
   const skipped = [];
   const leftovers = [];
@@ -176,7 +206,20 @@ export async function probeFirestore(client, src, [A, B], { log }) {
       continue;
     }
     fullyTested++;
-    await probeEscalation(client, t, mine, A, privFields.get(t.collectionPath), { tf, passed: pendingPass, skipped });
+    const recipe = {
+      service: 'firestore',
+      resource: t.collectionPath,
+      collection: scrub(aColl, A, marker),
+      docId: scrub(docId, A, marker),
+      ownerField: mine.ownerField,
+      markerField: mine.markerField,
+      payload: scrub(mine.payload, A, marker),
+      checks: [],
+    };
+    recipes.push(recipe);
+    // ok = the secure behaviour held; a proven critical leak is recorded as ok: false
+    const rec = (check, isOk, extra) => recipe.checks.push({ check, ok: isOk, ...extra });
+    await probeEscalation(client, t, mine, A, privFields.get(t.collectionPath), { tf, passed: pendingPass, skipped, rec });
     const ownedNow = owned || Boolean(mine.ownerField);
     const ownerDesc = t.ownerPathVar ? `path {${t.ownerPathVar}}` : mine.ownerField ? `field ${mine.ownerField}` : null;
     const rules = () => fix.ownerOnlyRules(t.match?.path || `/${t.collectionPath}/{${t.docVar}}`, mine.ownerField, t.ownerPathVar);
@@ -210,7 +253,11 @@ export async function probeFirestore(client, src, [A, B], { log }) {
         evidence: `as user B: ${bGet.evidence}`,
         fix: { code: rules() },
       });
-    } else if (denied(bGet)) passed.push(`${t.collectionPath}: B cannot read A's documents`);
+      if (ownedNow) rec('read', false);
+    } else if (denied(bGet)) {
+      passed.push(`${t.collectionPath}: B cannot read A's documents`);
+      rec('read', true);
+    }
     else skipped.push(`${t.collectionPath}: read test inconclusive (${bGet.status} ${msg(bGet.data)})`);
 
     // B lists the collection (what "allow list" really permits)
@@ -227,7 +274,11 @@ export async function probeFirestore(client, src, [A, B], { log }) {
         evidence: `as user B: ${bList.evidence} → ${foreign.length} foreign document(s) in the first page`,
         fix: { code: rules() },
       });
-    } else if (denied(bList)) passed.push(`${t.collectionPath}: B cannot list other users' documents`);
+      if (ownedNow) rec('list', false);
+    } else if (denied(bList)) {
+      passed.push(`${t.collectionPath}: B cannot list other users' documents`);
+      rec('list', true);
+    }
     else skipped.push(`${t.collectionPath}: list test inconclusive (${bList.status} ${msg(bList.data)})`);
 
     // anonymous read + list
@@ -242,7 +293,31 @@ export async function probeFirestore(client, src, [A, B], { log }) {
         evidence: `anonymous: ${anGet.evidence}`,
         fix: { code: rules() },
       });
-    } else if (denied(anGet)) passed.push(`${t.collectionPath}: anonymous visitors cannot read`);
+      if (ownedNow) rec('anon-read', false);
+    } else if (denied(anGet)) {
+      passed.push(`${t.collectionPath}: anonymous visitors cannot read`);
+      rec('anon-read', true);
+    }
+
+    // anonymous-auth user C reads: only where the unauthenticated visitor was refused
+    if (C && !ok(anGet)) {
+      const cGet = await client.getDoc(mine.path, { token: C.token });
+      if (ok(cGet) && publicByRule) notePublic(cGet);
+      else if (ok(cGet)) {
+        tf({
+          id: 'anon-auth-read',
+          severity: ownedNow ? 'critical' : 'warning',
+          title: `Anyone with an anonymous sign-in can read documents in "${t.collectionPath}"`,
+          detail: `Proven: an anonymous-auth user read A's document. ${ANON_AUTH_DETAIL}`,
+          evidence: `as anonymous-auth user C: ${cGet.evidence}`,
+          fix: { code: fix.notAnonymousRules(t.match?.path || `/${t.collectionPath}/{${t.docVar}}`, 'read', t.match && allowsFor(t.match, 'get'), ownedNow ? rules() : null) },
+        });
+        if (ownedNow) rec('anon-auth-read', false);
+      } else if (denied(cGet)) {
+        passed.push(`${t.collectionPath}: anonymous-auth users cannot read`);
+        rec('anon-auth-read', true);
+      } else skipped.push(`${t.collectionPath}: anonymous-auth read test inconclusive (${cGet.status} ${msg(cGet.data)})`);
+    }
 
     // B modifies A's document
     const patch = mine.markerField ? { [mine.markerField]: tamper(marker) } : mine.ownerField ? { [mine.ownerField]: A.id } : null;
@@ -257,7 +332,11 @@ export async function probeFirestore(client, src, [A, B], { log }) {
         evidence: `as user B: ${bUpd.evidence}`,
         fix: { code: rules() },
       });
-    } else if (denied(bUpd)) passed.push(`${t.collectionPath}: B cannot modify A's documents`);
+      rec('update', false);
+    } else if (denied(bUpd)) {
+      passed.push(`${t.collectionPath}: B cannot modify A's documents`);
+      rec('update', true);
+    }
     else skipped.push(`${t.collectionPath}: modify test inconclusive (${bUpd.status} ${msg(bUpd.data)})`);
 
     // B reassigns A's document to itself: rules that only check request.resource.data.owner
@@ -275,7 +354,11 @@ export async function probeFirestore(client, src, [A, B], { log }) {
           evidence: `as user B: ${bTake.evidence}`,
           fix: { code: rules() },
         });
-      } else if (denied(bTake)) passed.push(`${t.collectionPath}: B cannot reassign A's documents to itself`);
+        rec('takeover', false);
+      } else if (denied(bTake)) {
+        passed.push(`${t.collectionPath}: B cannot reassign A's documents to itself`);
+        rec('takeover', true);
+      }
       else skipped.push(`${t.collectionPath}: takeover test inconclusive (${bTake.status} ${msg(bTake.data)})`);
     }
 
@@ -285,6 +368,7 @@ export async function probeFirestore(client, src, [A, B], { log }) {
     const bNew = await client.createDoc(aColl, forgeId, forged, { token: B.token });
     if (ok(bNew)) {
       leftovers.push({ path: `${aColl}/${forgeId}`, by: [A, B] });
+      if (ownedNow) rec('forge', false);
       if (ownedNow)
         tf({
           id: 'impersonated-create',
@@ -294,7 +378,10 @@ export async function probeFirestore(client, src, [A, B], { log }) {
           evidence: `as user B: ${bNew.evidence}`,
           fix: { code: rules() },
         });
-    } else if (denied(bNew)) passed.push(`${t.collectionPath}: B cannot create documents as A`);
+    } else if (denied(bNew)) {
+      passed.push(`${t.collectionPath}: B cannot create documents as A`);
+      rec('forge', true);
+    }
     else skipped.push(`${t.collectionPath}: forged-create test inconclusive (${bNew.status} ${msg(bNew.data)})`);
 
     // anonymous visitor creates (and deletes) a document
@@ -315,7 +402,36 @@ export async function probeFirestore(client, src, [A, B], { log }) {
         evidence: `anonymous: ${anNew.evidence}${ok(anDel) ? `, then ${anDel.evidence}` : ''}`,
         fix: { code: rules() },
       });
-    } else if (denied(anNew)) passed.push(`${t.collectionPath}: anonymous visitors cannot create documents`);
+      if (ownedNow || ok(anDel)) rec('anon-create', false);
+    } else if (denied(anNew)) {
+      passed.push(`${t.collectionPath}: anonymous visitors cannot create documents`);
+      rec('anon-create', true);
+    }
+
+    // anonymous-auth user C creates (and deletes): only where the unauthenticated visitor was refused
+    if (C && !ok(anNew)) {
+      const cId = `accessprobe-${rand()}`;
+      const cNew = await client.createDoc(aColl, cId, { ...forged, ...(mine.markerField ? { [mine.markerField]: `${marker}-anonauth` } : {}) }, { token: C.token });
+      if (ok(cNew)) {
+        const cDel = await client.deleteDoc(`${aColl}/${cId}`, { token: C.token });
+        if (!ok(cDel)) leftovers.push({ path: `${aColl}/${cId}`, by: [A, B, C] });
+        const critical = ownedNow || ok(cDel);
+        tf({
+          id: ok(cDel) ? 'anon-auth-write' : 'anon-auth-create',
+          severity: critical ? 'critical' : 'warning',
+          title: ok(cDel)
+            ? `Anyone with an anonymous sign-in can create AND delete documents in "${t.collectionPath}"`
+            : `Anyone with an anonymous sign-in can create documents in "${t.collectionPath}"${ownedNow ? " in user A's name" : ''}`,
+          detail: `Proven: an anonymous-auth user created a document${ownedNow ? ` with ${ownerDesc} set to user A` : ''}${ok(cDel) ? ' and deleted it again' : ''}. ${ANON_AUTH_DETAIL}`,
+          evidence: `as anonymous-auth user C: ${cNew.evidence}${ok(cDel) ? `, then ${cDel.evidence}` : ''}`,
+          fix: { code: fix.notAnonymousRules(t.match?.path || `/${t.collectionPath}/{${t.docVar}}`, 'create', t.match && allowsFor(t.match, 'create'), ownedNow ? rules() : null) },
+        });
+        if (critical) rec('anon-auth-create', false);
+      } else if (denied(cNew)) {
+        passed.push(`${t.collectionPath}: anonymous-auth users cannot create documents`);
+        rec('anon-auth-create', true);
+      } else skipped.push(`${t.collectionPath}: anonymous-auth create test inconclusive (${cNew.status} ${msg(cNew.data)})`);
+    }
 
     // B deletes A's document (last: it destroys the test doc)
     if (takenOver) {
@@ -334,7 +450,11 @@ export async function probeFirestore(client, src, [A, B], { log }) {
         evidence: `as user B: ${bDel.evidence}`,
         fix: { code: rules() },
       });
-    } else if (denied(bDel)) passed.push(`${t.collectionPath}: B cannot delete A's documents`);
+      rec('delete', false);
+    } else if (denied(bDel)) {
+      passed.push(`${t.collectionPath}: B cannot delete A's documents`);
+      rec('delete', true);
+    }
     else skipped.push(`${t.collectionPath}: delete test inconclusive (${bDel.status} ${msg(bDel.data)})`);
 
     if (gone) leftovers.splice(leftovers.findIndex((l) => l.path === mine.path), 1);
@@ -354,7 +474,7 @@ export async function probeFirestore(client, src, [A, B], { log }) {
   }
   if (firestoreAnswers) passed.push(...pendingPass);
   else for (const p of pendingPass) skipped.push(`${p} — not proven: no Firestore request succeeded in this run (API disabled or App Check?)`);
-  return { findings, passed, skipped, left, fullyTested, count: targets.length };
+  return { findings, passed, skipped, left, fullyTested, count: targets.length, recipes };
 }
 
 // Read the shape a create rule demands: keys().hasOnly([...]) and "data.x is string"
@@ -443,7 +563,7 @@ export { allowsFor };
 // The rules grant extra rights when the caller's own document says so
 // (get(/…/users/$(request.auth.uid)).data.role == 'admin'). Can A write that field itself?
 // A's test document is deleted during cleanup, so nothing has to be put back.
-async function probeEscalation(client, t, mine, A, fields, { tf, passed, skipped }) {
+async function probeEscalation(client, t, mine, A, fields, { tf, passed, skipped, rec }) {
   if (!fields?.length) return;
   if (mine.path !== `${t.collectionPath}/${A.id}`) {
     skipped.push(`${t.collectionPath}: rules read ${fields.map((f) => f.field).join(', ')} from users' own documents, but accessprobe could not create a document at ${t.collectionPath}/<uid> to test it`);
@@ -456,7 +576,11 @@ async function probeEscalation(client, t, mine, A, fields, { tf, passed, skipped
     if (ok(r)) {
       changed.push(`${field} = ${JSON.stringify(value)}`);
       evidence ??= `as user A on its own document: ${r.evidence}`;
-    } else if (denied(r)) passed.push(`${t.collectionPath}: users cannot set their own ${field}`);
+      rec('escalation', false, { field, value });
+    } else if (denied(r)) {
+      passed.push(`${t.collectionPath}: users cannot set their own ${field}`);
+      rec('escalation', true, { field, value });
+    }
     else skipped.push(`${t.collectionPath}: ${field} change test inconclusive (${r.status} ${msg(r.data)})`);
   }
   if (!changed.length) return;

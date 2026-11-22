@@ -59,6 +59,9 @@ Firebase
   --database-rules <f>   Rules exported from the console, if they are not in --source:
   --firestore-rules <f>    firebase database:get /.settings/rules > database.rules.json
   --storage-rules <f>
+  --rules-tests <file>   Also write the checks as Security Rules tests for the Emulator
+                         Suite (e.g. test/accessprobe.rules.test.mjs, node:test +
+                         @firebase/rules-unit-testing). Leaks found now fail until fixed.
 
 Common
   --user-a <email:pw>    Existing test user A (default: sign up a new one)
@@ -86,6 +89,8 @@ Common
 What it does
   Signs up two test users, has user A create rows/files, then checks whether
   user B (and an anonymous visitor) can read, change or delete them.
+  Firebase with Anonymous sign-in enabled: an anonymous-auth user attacks too
+  (its token passes "request.auth != null").
   Exit codes: 0 ok, 1 critical issue found, 2 usage error, 3 nothing could be tested.
 
 Only test apps you own or are authorized to test.
@@ -114,6 +119,7 @@ const OPTIONS = {
   bucket: { type: 'string', multiple: true },
   out: { type: 'string' },
   pgtap: { type: 'string' },
+  'rules-tests': { type: 'string' },
   json: { type: 'boolean' },
   yes: { type: 'boolean' },
   quiet: { type: 'boolean', short: 'q' },
@@ -222,7 +228,7 @@ if (!v.yes) {
 
 try {
   const result = await scan(opts, prepared);
-  const { recipes, ...shown } = result;
+  const { recipes, rulesRecipes, ...shown } = result;
   if (v.json) console.log(JSON.stringify({ grade: grade(result.findings, result.stats), ...shown }, null, 2));
   else printReport(result, { wroteFile: Boolean(v.out) });
   if (v.out) {
@@ -233,6 +239,11 @@ try {
     const { writePgtap } = await import('../src/providers/supabase/pgtap.js');
     const msg = await writePgtap(v.pgtap, result);
     console.error(msg);
+  }
+  if (v['rules-tests']) {
+    const { writeRulesTests } = await import('../src/providers/firebase/rules-tests.js');
+    const rulesFiles = { firestore: v['firestore-rules'], database: v['database-rules'], storage: v['storage-rules'] };
+    console.error(await writeRulesTests(v['rules-tests'], result, { source: v.source, rulesFiles }));
   }
   if (result.findings.some((f) => f.severity === 'critical')) process.exit(1);
   process.exit(grade(result.findings, result.stats) === 'N/A' ? 3 : 0);
