@@ -18,7 +18,7 @@ jobs:
           node-version: 22
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 3.2.0 # pinned: resolving "latest" hits the GitHub API rate limit
       - name: Start local Supabase with the fixture migrations
         working-directory: test/supabase-local
         run: |
