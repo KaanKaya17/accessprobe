@@ -75,3 +75,17 @@ create view "safe_notes" with (security_invoker = true) as select * from notes;
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('source: CHECK (col in (…)) on a column becomes its allowed values', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { scanSource, sourceToDefinitions } = await import('../src/providers/supabase/source.js');
+  const { parseSchema } = await import('../src/providers/supabase/schema.js');
+  const dir = mkdtempSync(join(tmpdir(), 'ap-check-'));
+  mkdirSync(join(dir, 'supabase', 'migrations'), { recursive: true });
+  writeFileSync(join(dir, 'supabase', 'migrations', '1.sql'), "create table public.group_members (group_id uuid not null, user_id uuid not null, role text not null default 'player' check (role in ('organizer', 'co_organizer', 'player')), primary key (group_id, user_id));");
+  const s = parseSchema(sourceToDefinitions(await scanSource(dir)));
+  const role = s.tables[0].columns.find((c) => c.name === 'role');
+  assert.deepEqual(role.enum, ['organizer', 'co_organizer', 'player']);
+});

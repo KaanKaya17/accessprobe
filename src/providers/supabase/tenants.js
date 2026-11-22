@@ -17,8 +17,8 @@ import { ownerValue, filterFor, tamper, msg } from './probes.js';
 const TENANT_COL = /^(org|organization|organisation|team|workspace|tenant|company|account|group|club|household|space)_id$/i;
 const MEMBER_NAME = /member|membership|_users$|^users_|user_(orgs?|teams?|workspaces?)|(orgs?|teams?|workspaces?)_users/i;
 const ROLE_COL = /^(role|member_role|access|access_level|permission|level|type)$/i;
-const ADMIN_ROLE = /^(owner|admin|administrator|superadmin|manager)$/i;
-const MEMBER_ROLE = /^(member|viewer|reader|user|guest|editor|basic|read)$/i;
+const ADMIN_ROLE = /^(owner|admin|administrator|superadmin|manager|organizer|organiser|moderator|captain|founder|lead|kaptan|yonetici|yönetici|sahip)$/i;
+const MEMBER_ROLE = /^(member|viewer|reader|user|guest|editor|basic|read|player|participant|contributor|oyuncu|uye|üye)$/i;
 
 const rand = () => Math.random().toString(36).slice(2, 8);
 const denied = (r) => r.status === 401 || r.status === 403 || r.data?.code === '42501';
@@ -50,14 +50,19 @@ export function findTenancy(schema) {
   return { tenant, members: m, col: c.name, userCol: m.owner.name, roleCol: role?.name || null, roleEnum: role?.enum || null, scoped };
 }
 
+// allowed values come from an enum type or a CHECK (role in (…)) in the migrations; null = leave
+// the column to its default (usually the lowest role)
 function roleValues(enumValues) {
   if (enumValues?.length) {
+    const member = enumValues.filter((v) => MEMBER_ROLE.test(v));
+    const admin = enumValues.filter((v) => ADMIN_ROLE.test(v));
     return {
-      admin: enumValues.filter((v) => ADMIN_ROLE.test(v)),
-      member: enumValues.filter((v) => MEMBER_ROLE.test(v)),
+      // unknown names: any value that is not a plain member role counts as "more than a member"
+      admin: admin.length ? admin : enumValues.filter((v) => !member.includes(v)),
+      member: [...member, null],
     };
   }
-  return { admin: ['owner', 'admin'], member: ['member', 'viewer', 'user'] };
+  return { admin: ['owner', 'admin'], member: ['member', 'viewer', 'user', 'player', null] };
 }
 
 const q = (s) => (/^[a-z_][a-z0-9_]*$/.test(s) ? s : `"${s.replace(/"/g, '""')}"`);
@@ -186,22 +191,52 @@ export async function probeTenants(client, schema, [A, B], { log, findings, pass
     mine.push(memberRow(aMemberVal)); // A's membership goes last (after the org rows, before the org itself is gone)
 
     // --- A writes one row into every table scoped by the organization
+    // Tables that point at another scoped table (match_players → matches) are filled with the row A
+    // just created there; a second user column (ratings.ratee_id) gets B. A row without a text column
+    // is recognized by its primary key.
     const targets = [];
-    for (const t of ten.scoped) {
-      const marker = `accessprobe-${rand()}`;
-      const b = buildRow(t, { ownerId: ownerValue(t, A), marker, fixed: { [col]: orgId } });
-      if (!b || !b.markerCol) {
-        skipped.push(`${t.name}: organization tests need a text column to recognize the test row`);
-        continue;
+    const made = new Map(); // table name → A's row
+    const userTables = /^(auth\.users|users|profiles)$/;
+    const fill = (t) => {
+      const fixed = { [col]: orgId };
+      for (const c of t.columns) {
+        if (!c.required || c.hasDefault || c.name in fixed || !c.fk || c.name === t.owner?.name) continue;
+        if (made.has(c.fk.table)) fixed[c.name] = made.get(c.fk.table)[c.fk.column];
+        else if (userTables.test(c.fk.table)) fixed[c.name] = ownerValue({ ...t, owner: c }, B) ?? B.id;
+        else return null; // points at something we did not create
       }
-      const r = await client.insert(t.name, b.row, { token: A.token });
-      const row = rows(r)?.[0];
-      if (!row) {
-        skipped.push(`${t.name}: A, a member, could not add a row to its own organization (${r.status} ${msg(r.data)}), so it was not tested for other organizations`);
-        continue;
+      return fixed;
+    };
+    const pending = [...ten.scoped];
+    for (let progress = true; pending.length && progress; ) {
+      progress = false;
+      for (const t of [...pending]) {
+        const fixed = fill(t);
+        if (!fixed) continue;
+        pending.splice(pending.indexOf(t), 1);
+        progress = true;
+        const marker = `accessprobe-${rand()}`;
+        const b = buildRow(t, { ownerId: ownerValue(t, A), marker, fixed });
+        if (!b) {
+          skipped.push(`${t.name}: organization tests skipped — required columns accessprobe cannot fill`);
+          continue;
+        }
+        const r = await client.insert(t.name, b.row, { token: A.token });
+        const row = rows(r)?.[0];
+        if (!row) {
+          skipped.push(`${t.name}: A, a member, could not add a row to its own organization (${r.status} ${msg(r.data)}), so it was not tested for other organizations`);
+          continue;
+        }
+        const c = track(t, row, b.markerCol, b.markerCol ? marker : undefined);
+        if (!filterFor(c)) {
+          skipped.push(`${t.name}: organization tests need a text column or a primary key to recognize the test row`);
+          continue;
+        }
+        made.set(t.name, row);
+        targets.push({ t, c });
       }
-      targets.push({ t, c: track(t, row, b.markerCol, marker) });
     }
+    for (const t of pending) skipped.push(`${t.name}: organization tests skipped — it references a table accessprobe did not create a row in`);
     const readBack = async (x, token) => rows(await client.select(x.t.name, { token, filter: filterFor(x.c) }));
 
     // --- 1. B is an outsider
@@ -221,8 +256,11 @@ export async function probeTenants(client, schema, [A, B], { log, findings, pass
       } else if (denied(r) || rows(r)) passed.push(`${x.t.name}: users outside the organization cannot read its rows`);
       else skipped.push(`${x.t.name}: outsider read test inconclusive (${r.status} ${msg(r.data)})`);
 
-      const upd = await client.update(x.t.name, filterFor(x.c), { [x.c.markerCol]: tamper(x.c.marker) }, { token: B.token });
-      if (rows(upd)?.length) {
+      // no text column to change: the change test needs one (read and delete are still tested)
+      const upd = x.c.markerCol ? await client.update(x.t.name, filterFor(x.c), { [x.c.markerCol]: tamper(x.c.marker) }, { token: B.token }) : null;
+      if (!upd) {
+        /* skipped */
+      } else if (rows(upd)?.length) {
         x.c.marker = tamper(x.c.marker);
         tf({
           id: 'cross-tenant-update',
@@ -314,7 +352,9 @@ export async function probeTenants(client, schema, [A, B], { log, findings, pass
     for (const x of targets) if (!x.c.deleted && !x.outsiderReads) memberSees.set(x, (await readBack(x, bTok))?.length > 0);
 
     if (roleCol && roles.admin.length) {
-      const up = roles.admin[0];
+      // the role B really got (the column default when we left it out)
+      added.role ??= rows(await client.select(M.name, { token: A.token, filter: memberFilter(bMemberVal) }))?.[0]?.[roleCol] ?? null;
+      const up = roles.admin.find((v) => v !== added.role) ?? roles.admin[0];
       const r = await client.update(M.name, memberFilter(bMemberVal), { [roleCol]: up }, { token: bTok });
       const now = rows(await client.select(M.name, { token: A.token, filter: memberFilter(bMemberVal) }))?.[0];
       if (rows(r)?.length && now && now[roleCol] === up) {
@@ -327,7 +367,7 @@ export async function probeTenants(client, schema, [A, B], { log, findings, pass
           evidence: `as user B (member): ${r.evidence} → ${roleCol} is now '${up}'`,
           fix: { sql: roleFix(ten) },
         });
-        await client.update(M.name, memberFilter(bMemberVal), { [roleCol]: added.role }, { token: A.token });
+        if (added.role !== null) await client.update(M.name, memberFilter(bMemberVal), { [roleCol]: added.role }, { token: A.token });
       } else if (now && now[roleCol] === added.role) passed.push(`${M.name}: members cannot raise their own ${roleCol}`);
     }
 

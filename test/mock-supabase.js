@@ -165,6 +165,17 @@ function makeState() {
         rls: { select: (c) => authed(c), insert: (c, r) => member(c, r.org_id), update: (c, r) => member(c, r.org_id), delete: (c, r) => admin(c, r.org_id) },
         rows: [],
       },
+      // CORRECT, and nested: points at an invoice, no text column (recognized by its primary key)
+      invoice_lines: {
+        columns: {
+          id: ['bigint', { pk: true, default: true }],
+          org_id: ['bigint', { required: true, fk: 'orgs' }],
+          invoice_id: ['bigint', { required: true, fk: 'invoices' }],
+          amount: ['numeric', { required: true }],
+        },
+        rls: { select: (c, r) => member(c, r.org_id), insert: (c, r) => member(c, r.org_id), update: (c, r) => member(c, r.org_id), delete: (c, r) => admin(c, r.org_id) },
+        rows: [],
+      },
       // BUG: membership from the JWT (app_metadata.orgs): a removed member keeps access until the token is refreshed
       org_files: {
         columns: { id: ['bigint', { pk: true, default: true }], org_id: ['bigint', { required: true, fk: 'orgs' }], path: ['text', { required: true }] },
