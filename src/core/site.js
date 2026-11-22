@@ -9,6 +9,7 @@ const SECRET_PATTERNS = [
   { id: 'anthropic-key', name: 'Anthropic API key', re: /sk-ant-[A-Za-z0-9_-]{32,}/g },
   { id: 'aws-access-key', name: 'AWS access key id', re: /AKIA[0-9A-Z]{16}/g },
   { id: 'github-token', name: 'GitHub token', re: /gh[pousr]_[A-Za-z0-9]{36,}/g },
+  { id: 'appwrite-api-key', name: 'Appwrite API key', re: /standard_[0-9a-f]{128,}/g },
 ];
 
 export async function fetchSite(siteUrl, { log = () => {} } = {}) {

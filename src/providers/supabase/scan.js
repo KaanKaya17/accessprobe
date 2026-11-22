@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { SupabaseClient, decodeJwt } from './client.js';
 import { looksLikePocketBase } from '../pocketbase/client.js';
+import { claimsUrl as appwriteClaimsUrl } from '../appwrite/scan.js';
 import { findProjectConfig } from './project-config.js';
 import { extract } from './discover.js';
 import { parseSchema } from './schema.js';
@@ -24,8 +25,8 @@ const projectConfig = (dir) => {
 // or a Supabase URL/anon key somewhere in the project (.env, local.properties, client code).
 export async function detect(opts, { site }) {
   if (opts.anonKey) return true;
-  // --url is shared with PocketBase: a server that answers like PocketBase is not Supabase
-  if (opts.url) return !(await looksLikePocketBase(opts.url));
+  // --url is shared with PocketBase and Appwrite: a server that answers like one of them is not Supabase
+  if (opts.url) return !(await looksLikePocketBase(opts.url)) && !(await appwriteClaimsUrl(opts));
   if (site && extract(site.sources).anonKeys.length) return true;
   if (opts.source) {
     if (existsSync(join(opts.source, 'supabase'))) return true;

@@ -100,3 +100,64 @@ jobs:
           echo "Firebase: the Action reported exit code 1 and found the seeded leaks."
       - if: failure()
         run: cat test/firebase/emulators.log | tail -50
+
+  real-appwrite:
+    # A real self-hosted Appwrite (pinned) with the fixture's appwrite.json: broken and correct
+    # collections, a TablesDB table and buckets. setup.mjs uses a server key for FIXTURE SETUP
+    # ONLY; accessprobe gets nothing but the endpoint and the project id.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      APPWRITE_VERSION: 2.7.4
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install Appwrite ${{ env.APPWRITE_VERSION }} (non-interactive)
+        run: |
+          mkdir -p "$RUNNER_TEMP/aw"
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$RUNNER_TEMP/aw/appwrite":/usr/src/code/appwrite:rw \
+            --entrypoint=install "appwrite/appwrite:$APPWRITE_VERSION" \
+            --http-port=80 --https-port=443 --interactive=N --no-start=true
+          cd "$RUNNER_TEMP/aw/appwrite"
+          ls -la
+          # the test signs up several users per minute: no abuse rate limits (files are root-owned)
+          if grep -q '^_APP_OPTIONS_ABUSE=' .env; then sudo sed -i 's/^_APP_OPTIONS_ABUSE=.*/_APP_OPTIONS_ABUSE=disabled/' .env; else echo '_APP_OPTIONS_ABUSE=disabled' | sudo tee -a .env; fi
+          grep -E '^_APP_(OPTIONS_ABUSE|CONSOLE_WHITELIST|DOMAIN|ENV)' .env || true
+          docker compose up -d --quiet-pull
+      - name: Wait for /v1/health/version
+        run: |
+          for i in $(seq 1 120); do
+            if curl -sf http://localhost/v1/health/version; then echo; exit 0; fi
+            sleep 5
+          done
+          docker compose -f "$RUNNER_TEMP/aw/appwrite/docker-compose.yml" ps
+          exit 1
+      - name: Fixture setup (console account, project, server key, appwrite.json schema)
+        run: node test/appwrite/setup.mjs http://localhost/v1
+      - name: accessprobe against real Appwrite
+        run: |
+          set +e
+          node bin/accessprobe.js --url http://localhost/v1 --project-id accessprobe-test --source test/appwrite/app --yes --json > result.json
+          code=$?
+          set -e
+          echo "exit code $code (1 expected: the fixture has critical leaks)"
+          [ "$code" = 1 ] || { cat result.json; exit 1; }
+          node test/appwrite/check.mjs result.json appwrite-setup.json
+      - name: The answers the adapter relies on (status codes, error types, defaults, cookies)
+        run: node test/appwrite/behaviour.mjs appwrite-setup.json
+      - name: accessprobe without appwrite.json (--table only, attributes guessed)
+        run: |
+          set +e
+          node bin/accessprobe.js --platform appwrite --url http://localhost/v1 --project-id accessprobe-test             --table main/shared_docs --table main/guestbook --table main/tasks --table main/profiles --yes --json > code-only.json
+          code=$?
+          set -e
+          [ "$code" = 1 ] || { cat code-only.json; exit 1; }
+          node test/appwrite/check-code-only.mjs code-only.json
+      - if: failure()
+        run: |
+          cat result.json 2>/dev/null | head -c 20000 || true
+          docker compose -f "$RUNNER_TEMP/aw/appwrite/docker-compose.yml" logs --tail 150 appwrite || true

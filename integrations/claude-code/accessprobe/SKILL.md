@@ -1,6 +1,6 @@
 ---
 name: accessprobe
-description: Prove that a Supabase, Firebase or PocketBase app's access rules actually protect user data, by running accessprobe with two real test users, then fix what it finds without breaking the app. Use when the user asks to check security, RLS, Row Level Security, Firestore/Realtime Database/Storage rules, PocketBase API rules, "can users see each other's data", or before shipping an app built on Supabase, Firebase or PocketBase.
+description: Prove that a Supabase, Firebase, PocketBase or Appwrite app's access rules actually protect user data, by running accessprobe with two real test users, then fix what it finds without breaking the app. Use when the user asks to check security, RLS, Row Level Security, Firestore/Realtime Database/Storage rules, PocketBase API rules, Appwrite collection/document/bucket permissions, "can users see each other's data", or before shipping an app built on Supabase, Firebase, PocketBase or Appwrite.
 ---
 
 # accessprobe: prove access rules work, then fix them safely
@@ -26,7 +26,7 @@ test** and pass `--url` / `--project-id`. Never pick production yourself.
 
 ## 2. Run it
 
-From the app's project folder (where `supabase/`, `firestore.rules`, `google-services.json` or `pb_migrations/` live):
+From the app's project folder (where `supabase/`, `firestore.rules`, `google-services.json`, `pb_migrations/` or `appwrite.json` live):
 
 ```bash
 # Supabase
@@ -38,12 +38,16 @@ npx accessprobe --source . --yes --json > accessprobe.json
 # PocketBase (collections and rules are read from pb_migrations/; never pass superuser credentials)
 npx accessprobe --url https://pb.example.com --source . --yes --json > accessprobe.json
 
+# Appwrite (endpoint + project id only, both public; collections and permissions come from appwrite.json)
+npx accessprobe --url https://cloud.appwrite.io/v1 --project-id <project id> --source . --yes --json > accessprobe.json
+
 # deployed web app (also checks the JS bundle for leaked secret keys)
 npx accessprobe --site https://the-app.com --source . --yes --json > accessprobe.json
 ```
 
 - Only the **public** anon / publishable / web API key is needed. Never pass a service_role or secret
-  key; accessprobe refuses them.
+  key; accessprobe refuses them. Appwrite needs no key at all: never pass an Appwrite API key.
+- Appwrite collection ids need their database: `--table <database>/<collection>`.
 - If the Firebase rules live only in the console and the user is logged in with the Firebase CLI,
   export them first (this reads the rules, not data):
   `firebase database:get /.settings/rules --project <id> > database.rules.json`, then add
@@ -82,6 +86,8 @@ relies on breaks the app for every user. Before proposing or applying a fix:
      accessprobe against it.
    - PocketBase: run a local `pocketbase serve` with the new `pb_migrations` file and re-run accessprobe
      against it.
+   - Appwrite: change the permissions in appwrite.json, `appwrite push collections` to a local or
+     staging Appwrite, and re-run accessprobe against it.
 4. **Ask the user before deploying to production**, and back up the current rules or policies first.
    After deploying, re-run accessprobe and confirm the critical findings are gone and nothing new appeared.
 5. Some leaks can't be fixed by rules alone, because the app itself needs the access. Tell the user
@@ -89,6 +95,7 @@ relies on breaks the app for every user. Before proposing or applying a fix:
 
 ## 5. Clean up
 
-accessprobe deletes its test data. Firebase test users delete themselves. Supabase test users need
+accessprobe deletes its test data. Firebase and PocketBase test users delete themselves. Appwrite test
+users can only block themselves, so they are listed in `notes[]` for removal in the console. Supabase test users need
 `--cleanup-rpc <fn>` (if the app has a delete-my-account function) or manual removal, and
 accessprobe lists them in `notes[]`. Relay any "Could not delete" note to the user.

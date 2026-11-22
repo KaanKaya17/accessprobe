@@ -8,7 +8,7 @@ import { scan, plan } from '../src/core/scan.js';
 import { printReport, markdownReport, grade, color } from '../src/core/report.js';
 
 const HELP = `
-accessprobe — prove your backend's access rules actually work (Supabase, Firebase, PocketBase)
+accessprobe — prove your backend's access rules actually work (Supabase, Firebase, PocketBase, Appwrite)
 
 Usage
   npx accessprobe                  test the project in this folder (finds the config itself)
@@ -18,6 +18,7 @@ Usage
   npx accessprobe --url https://xyz.supabase.co --anon-key eyJ... --source .
   npx accessprobe --project-id my-app --api-key AIza... --source .
   npx accessprobe --url https://pb.your-app.com --source .
+  npx accessprobe --url https://cloud.appwrite.io/v1 --project-id 6650abc --source .
 
 Options
   --site <url>           Your deployed app. Finds the backend config in its JS
@@ -27,8 +28,10 @@ Options
                          database.rules.json, google-services.json, collection names.
                          PocketBase: pb_migrations/*.js (collections + API rules),
                          new PocketBase("…") and pb.collection("…") in code.
+                         Appwrite: appwrite.json (collections, attributes, permissions,
+                         buckets), setEndpoint/setProject and createDocument("db", "…").
   --platform <name>      Force a backend (default: auto-detect): supabase, firebase,
-                         pocketbase
+                         pocketbase, appwrite
 
 Supabase
   --url <url>            Supabase project URL (skip discovery)
@@ -37,6 +40,15 @@ Supabase
 PocketBase
   --url <url>            PocketBase server URL. Never pass admin / superuser
                          credentials: test users sign up through "users".
+
+Appwrite
+  --url <url>            Appwrite endpoint (https://cloud.appwrite.io/v1 or your server;
+                         detected through the public /v1/health/version)
+  --project-id <id>      Appwrite project id. With --url (and no --api-key) or
+                         --platform appwrite, --project-id means the Appwrite project.
+                         Never pass an API key: test users sign up through the Account API.
+  --table <db>/<coll>    Appwrite collection ids need their database id (a bare name
+                         uses the only database in appwrite.json)
 
 Firebase
   --project-id <id>      Firebase project id (skip discovery)
@@ -53,7 +65,7 @@ Common
   --cleanup-rpc <fn>     At the end, call this RPC as each test user to delete them
                          (e.g. delete_my_account). Also applies to --user-a/--user-b!
   --table <name>         Also test this table / collection (repeatable; for when the
-                         schema is hidden)
+                         schema is hidden; Appwrite: database/collection)
   --only <name>          Test only this table / collection (repeatable)
   --bucket <name>        Also test this storage bucket (repeatable)
   --out <file.md>        Write a Markdown report with fix SQL + AI prompts
@@ -137,7 +149,7 @@ if (!v.help && !v.site && !v.url && !v['project-id'] && !v.source && looksLikePr
   console.error(color.dim(`No target given — testing the project in this folder (${process.cwd()}).`));
 }
 
-const target = v.site || v.url || (v['project-id'] && `Firebase project ${v['project-id']}`) || (v.source && `the project in ${v.source === '.' ? process.cwd() : v.source}`);
+const target = v.site || v.url || (v['project-id'] && `project ${v['project-id']}`) || (v.source && `the project in ${v.source === '.' ? process.cwd() : v.source}`);
 if (v.help || !target) {
   console.log(HELP);
   process.exit(v.help ? 0 : 2);
@@ -145,7 +157,7 @@ if (v.help || !target) {
 
 function looksLikeProject(dir) {
   return [
-    'package.json', 'supabase', 'pb_migrations', 'firebase.json', 'firestore.rules', 'database.rules.json', 'pubspec.yaml',
+    'package.json', 'supabase', 'pb_migrations', 'appwrite.json', 'appwrite.config.json', 'firebase.json', 'firestore.rules', 'database.rules.json', 'pubspec.yaml',
     'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'local.properties', '.env', '.env.local',
   ].some((f) => existsSync(join(dir, f)));
 }

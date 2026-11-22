@@ -20,8 +20,8 @@ cd your-app
 npx accessprobe
 ```
 
-That's it. accessprobe finds your Supabase, Firebase or PocketBase config in `.env`, `local.properties`,
-`google-services.json`, `pb_migrations/` or your code, using only the public key an attacker would also see. Then it
+That's it. accessprobe finds your Supabase, Firebase, PocketBase or Appwrite config in `.env`, `local.properties`,
+`google-services.json`, `pb_migrations/`, `appwrite.json` or your code, using only the public key an attacker would also see. Then it
 reads your migrations or rules and runs the tests. Add `--site https://your-app.com` to also check
 the deployed JavaScript bundle for leaked secret keys.
 
@@ -134,8 +134,25 @@ update and delete return 404. accessprobe only counts that as a pass when A's ow
 endpoint shows the record still exists and is unchanged. A `""` (public) list or view rule is reported
 as *public by design*. Fixes are API rule strings, plus the same rules as a `pb_migrations` file.
 
+**Appwrite**
+
+| Area | Check |
+|---|---|
+| Config | endpoint + project id from `new Client().setEndpoint("…").setProject("…")`, `APPWRITE_ENDPOINT` / `APPWRITE_PROJECT_ID` env vars, `appwrite.json`, or `--url` + `--project-id`. Collections (attributes, `$permissions`, `documentSecurity`), TablesDB tables and buckets are read from `appwrite.json` / `appwrite.config.json`; ids also come from `databases.createDocument("db", "…")` calls. An API key in a browser-exposed env var or the site bundle is reported |
+| Collections / tables | A creates a document **without explicit permissions** (what most apps do), then **B reads, lists, modifies and deletes it**, **B rewrites a document's `$permissions` to itself** (takeover), anonymous read, list and create. Catches `read("any")` / `read("users")` on private data, `update("users")` / `delete("users")` at collection level, document security turned off, and `create("any")` |
+| Storage | **B downloads / lists / renames / takes over / deletes A's files**, anonymous download and upload (`--bucket` or buckets from `appwrite.json` and code) |
+
+Appwrite hides documents instead of refusing when document security is on (404 or an empty list).
+accessprobe only counts that as a pass when A's own read through the same endpoint shows the document
+unchanged; a `401 user_unauthorized` is an explicit refusal. Both the `databases/…/documents` API and the
+TablesDB `tablesdb/…/rows` API are supported. Fixes are Appwrite permission strings
+(document security on, `create("users")` at collection level, `Permission.read(Role.user(id))` per
+document), plus the `appwrite.json` snippet when the project has one.
+
 Test rows, documents, records and files are deleted at the end. Firebase and PocketBase test users
-delete themselves (where the users delete rule allows it; otherwise the report lists them). Supabase
+delete themselves (where the users delete rule allows it; otherwise the report lists them). Appwrite
+clients cannot delete their own account, so Appwrite test users block themselves and the report lists
+them for deletion in the console. Supabase
 test users can't be deleted with the anon key, so the report tells you which ones to remove, unless
 you pass `--cleanup-rpc`.
 
@@ -208,6 +225,26 @@ Test users sign up through the `users` collection and delete themselves at the e
 lists collections to superusers, so without `pb_migrations` the collection names come from your code
 (`pb.collection("posts")`) or `--table`, and fields are worked out from the API's answers.
 
+**Appwrite:**
+
+```bash
+# endpoint + project id (both public) + your project folder with appwrite.json
+npx accessprobe --url https://cloud.appwrite.io/v1 --project-id 6650abc --source .
+
+# found in your code too: new Client().setEndpoint("…").setProject("…")
+npx accessprobe --source .
+
+# no appwrite.json? name the collections as database/collection (run `appwrite pull collections` for exact results)
+npx accessprobe --url https://cloud.appwrite.io/v1 --project-id 6650abc --table main/orders --bucket receipts
+```
+
+accessprobe never asks for an API key or console login: it sends only `X-Appwrite-Project` and the test
+users' own session, exactly like the Web SDK. Test users sign up through the Account API
+(email/password must be enabled). Appwrite lists collections only to API keys, so without `appwrite.json`
+the ids come from your code or `--table`, and attributes are worked out from the API's answers; a
+collection whose required attributes can't be guessed is listed in the notes as not tested.
+`--project-id` with `--url` (or `--platform appwrite`) means the Appwrite project, not Firebase.
+
 **Exit codes:** `0` ok, `1` critical issue found, `2` usage error, `3` nothing could be tested.
 accessprobe never reports a clean grade for an app it couldn't test.
 
@@ -253,7 +290,7 @@ jobs:
           eval "$(supabase status -o env)"
           echo "SB_URL=$API_URL" >> "$GITHUB_ENV"
           echo "SB_ANON=${ANON_KEY:-$PUBLISHABLE_KEY}" >> "$GITHUB_ENV"
-      - uses: KaanKaya17/accessprobe@v0.7.0
+      - uses: KaanKaya17/accessprobe@v0.8.0
         with:
           args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source .
 ```
@@ -265,7 +302,7 @@ jobs:
         with: { distribution: temurin, java-version: '21' }
       - run: npx firebase-tools emulators:start --only auth,firestore,database,storage --project demo-ci &
       - run: npx wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099
-      - uses: KaanKaya17/accessprobe@v0.7.0
+      - uses: KaanKaya17/accessprobe@v0.8.0
         with:
           args: --project-id demo-ci --api-key fake --source . --emulator
 ```
@@ -318,7 +355,7 @@ project. It asks you to confirm ownership before every run unless you pass `--ye
 - [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)
 - [x] Privilege escalation (users editing their own `role` / `plan`) and views that skip RLS
 - [x] PocketBase: collection API rules, users and privilege escalation (tested against a real PocketBase binary)
-- [ ] Appwrite: same two-user engine, one adapter
+- [x] Appwrite: collection, document and bucket permissions, documents and TablesDB APIs (tested against a real self-hosted Appwrite)
 
 ## Contributing
 

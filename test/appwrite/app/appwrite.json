@@ -1,0 +1,111 @@
+{
+  "projectId": "accessprobe-test",
+  "projectName": "accessprobe fixture",
+  "endpoint": "http://localhost/v1",
+  "databases": [{ "$id": "main", "name": "Main", "enabled": true }],
+  "collections": [
+    {
+      "$id": "notes",
+      "$permissions": ["create(\"users\")"],
+      "databaseId": "main",
+      "name": "Notes (correct: document security on, users may only create)",
+      "enabled": true,
+      "documentSecurity": true,
+      "attributes": [
+        { "key": "text", "type": "string", "required": true, "array": false, "size": 255 },
+        { "key": "done", "type": "boolean", "required": false, "array": false, "default": false }
+      ],
+      "indexes": []
+    },
+    {
+      "$id": "profiles",
+      "$permissions": ["create(\"users\")", "read(\"any\")"],
+      "databaseId": "main",
+      "name": "Profiles (read(\"any\") on private data)",
+      "enabled": true,
+      "documentSecurity": true,
+      "attributes": [
+        { "key": "bio", "type": "string", "required": true, "array": false, "size": 1000 },
+        { "key": "age", "type": "integer", "required": true, "array": false, "min": 13, "max": 120 },
+        { "key": "email", "type": "string", "format": "email", "required": true, "array": false, "size": 254 }
+      ],
+      "indexes": []
+    },
+    {
+      "$id": "tasks",
+      "$permissions": ["create(\"users\")", "update(\"users\")"],
+      "databaseId": "main",
+      "name": "Tasks (collection-level update(\"users\"))",
+      "enabled": true,
+      "documentSecurity": true,
+      "attributes": [
+        { "key": "title", "type": "string", "required": true, "array": false, "size": 100 },
+        { "key": "status", "type": "string", "format": "enum", "elements": ["open", "done"], "required": true, "array": false, "size": 10 }
+      ],
+      "indexes": []
+    },
+    {
+      "$id": "guestbook",
+      "$permissions": ["create(\"any\")"],
+      "databaseId": "main",
+      "name": "Guestbook (create(\"any\"))",
+      "enabled": true,
+      "documentSecurity": true,
+      "attributes": [{ "key": "message", "type": "string", "required": true, "array": false, "size": 500 }],
+      "indexes": []
+    },
+    {
+      "$id": "shared_docs",
+      "$permissions": ["create(\"users\")", "read(\"users\")", "update(\"users\")", "delete(\"users\")"],
+      "databaseId": "main",
+      "name": "Shared docs (document security off, users may do everything)",
+      "enabled": true,
+      "documentSecurity": false,
+      "attributes": [{ "key": "content", "type": "string", "required": false, "array": false, "size": 5000 }],
+      "indexes": []
+    },
+    {
+      "$id": "admin_reports",
+      "$permissions": ["read(\"users\")"],
+      "databaseId": "main",
+      "name": "Admin reports (users cannot write)",
+      "enabled": true,
+      "documentSecurity": false,
+      "attributes": [{ "key": "summary", "type": "string", "required": true, "array": false, "size": 500 }],
+      "indexes": []
+    }
+  ],
+  "tablesDB": [{ "$id": "main", "name": "Main", "enabled": true }],
+  "tables": [
+    {
+      "$id": "todos",
+      "$permissions": ["create(\"users\")"],
+      "databaseId": "main",
+      "name": "Todos (TablesDB, correct)",
+      "enabled": true,
+      "rowSecurity": true,
+      "columns": [{ "key": "label", "type": "varchar", "required": true, "array": false, "size": 200 }],
+      "indexes": []
+    }
+  ],
+  "buckets": [
+    {
+      "$id": "avatars",
+      "$permissions": ["create(\"users\")"],
+      "fileSecurity": true,
+      "name": "Avatars (correct)",
+      "enabled": true,
+      "maximumFileSize": 30000000,
+      "allowedFileExtensions": []
+    },
+    {
+      "$id": "uploads",
+      "$permissions": ["create(\"users\")", "read(\"any\")"],
+      "fileSecurity": true,
+      "name": "Uploads (read(\"any\"))",
+      "enabled": true,
+      "maximumFileSize": 30000000,
+      "allowedFileExtensions": []
+    }
+  ]
+}

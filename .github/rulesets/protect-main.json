@@ -65,6 +65,9 @@
           },
           {
             "context": "firebase-action"
+          },
+          {
+            "context": "real-appwrite"
           }
         ]
       }
