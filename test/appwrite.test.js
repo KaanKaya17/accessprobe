@@ -126,15 +126,25 @@ test('only the project header and the session cookie are sent — never an API k
   assert.ok(server.state.requests.some((r) => r.headers.cookie && !r.headers['x-appwrite-jwt']), 'users talk through their session cookie');
 });
 
-test('cleanup: no test documents or files are left; created test users blocked themselves and are listed', () => {
+test('cleanup: no test documents or files are left; the two test users are kept and reused', () => {
   for (const [k, c] of server.state.containers) assert.equal(c.docs.size, 0, `${k}: ${c.docs.size} document(s) left`);
   for (const [k, b] of server.state.buckets) assert.equal(b.files.size, 0, `bucket ${k}: ${b.files.size} file(s) left`);
   assert.ok(!result.notes.some((n) => /Could not/.test(n)), result.notes.join('\n'));
-  const note = result.notes.find((n) => n.includes('blocked themselves'));
-  assert.ok(note, result.notes.join('\n'));
+  const kept = result.notes.find((n) => n.startsWith('Test users kept for the next run'));
+  assert.ok(kept, result.notes.join('\n'));
+  assert.ok(codeOnly.notes.some((n) => n.startsWith('Reused the test users')), codeOnly.notes.join('\n'));
   const created = [...server.state.users.values()];
-  assert.ok(created.length >= 4 && created.every((u) => u.status === false), 'every test user is blocked');
-  assert.ok(created.every((u) => (result.notes.join('\n') + codeOnly.notes.join('\n')).includes(u.email)));
+  assert.equal(created.length, 2, 'the second run created no new accounts');
+  assert.ok(created.every((u) => u.status !== false && kept.includes(u.email)));
+});
+
+test('--fresh-users: new test users block themselves and are listed for deletion', async () => {
+  const before = new Set(server.state.users.keys());
+  const r = await scan({ url, projectId: PROJECT_ID, source: FIXTURE_DIR, only: ['notes'], freshUsers: true, quiet: true });
+  const fresh = [...server.state.users.entries()].filter(([k]) => !before.has(k)).map(([, u]) => u);
+  assert.equal(fresh.length, 2);
+  assert.ok(fresh.every((u) => u.status === false), 'fresh test users are blocked');
+  assert.ok(fresh.every((u) => r.notes.some((n) => n.includes('blocked themselves') && n.includes(u.email))));
 });
 
 test('no appwrite.json: --table db/collection is still attacked, attributes guessed from the answers', () => {

@@ -4,6 +4,7 @@ import { SupabaseClient, decodeJwt } from './client.js';
 import { looksLikePocketBase } from '../pocketbase/client.js';
 import { claimsUrl as appwriteClaimsUrl } from '../appwrite/scan.js';
 import { findProjectConfig } from './project-config.js';
+import { withReusableUsers, saveUsers, forgetUsers, usersFile } from '../../core/test-users.js';
 import { extract } from './discover.js';
 import { parseSchema } from './schema.js';
 import { scanSource, sourceToDefinitions } from './source.js';
@@ -86,13 +87,15 @@ export async function scan(opts, { site, log }) {
 
   // 2. two test users
   log('→ Signing in two test users (A and B)');
-  const users = await setupUsers(client, { userA: opts.userA, userB: opts.userB, emailDomain: opts.emailDomain, log });
+  const { users, reuse } = await withReusableUsers({ platform: 'supabase', target: url, opts, log }, (userA, userB) =>
+    setupUsers(client, { userA, userB, emailDomain: opts.emailDomain, log }),
+  );
 
   const created = []; // test rows, cleaned up in finally even if a probe throws
   try {
     // 3. schema — as anon AND as a signed-in user: PostgREST only lists what the role may touch
     log(`→ Reading API schema from ${url}/rest/v1/`);
-    const schema = await loadSchema(client, users[0].token, notes, opts.source, log);
+    const schema = await loadSchema(client, users[0].token, notes, opts.source, log, opts.schemaFiles);
     for (const name of opts.tables || []) {
       if (!schema.tables.find((t) => t.name === name)) {
         schema.tables.push({ name, columns: [], pk: null, owner: null, writable: true, isView: false, nameOnly: true });
@@ -153,15 +156,19 @@ export async function scan(opts, { site, log }) {
     log('→ Cleaning up test data');
     const left = await cleanupRows(client, created, users);
     if (left.length) notes.push(`Could not delete some test rows, remove them manually: ${left.join('; ')}`);
-    await cleanupUsers(client, users, opts.cleanupRpc, notes);
+    await cleanupUsers(client, users, opts.cleanupRpc, notes, reuse ? url : null);
   }
 }
 
-async function loadSchema(client, token, notes, sourceDir, log) {
+async function loadSchema(client, token, notes, sourceDir, log, schemaFiles = []) {
   const merged = { tables: new Map(), rpcs: new Set() };
   let anyOk = false;
-  if (sourceDir) {
-    const src = await scanSource(sourceDir);
+  const fromSql = new Set(); // tables with columns from migrations / --schema files
+  const live = new Set(); // tables the live API reports
+  for (const f of schemaFiles) if (!existsSync(f)) throw new Error(`--schema file not found: ${f}`);
+  if (sourceDir || schemaFiles.length) {
+    const src = await scanSource(sourceDir, schemaFiles);
+    for (const [name, t] of src.tables) if (!t.nameOnly) fromSql.add(name);
     const s = parseSchema(sourceToDefinitions(src));
     for (const t of s.tables) merged.tables.set(t.name, t);
     s.rpcs.forEach((x) => merged.rpcs.add(x));
@@ -182,6 +189,7 @@ async function loadSchema(client, token, notes, sourceDir, log) {
     anyOk = true;
     const s = parseSchema(r.data);
     for (const t of s.tables) {
+      live.add(t.name);
       const prev = merged.tables.get(t.name);
       if (prev?.sourceView) t.sourceView = true; // the migrations know it is a view; the API may not
       if (!prev || prev.nameOnly || t.columns.length > prev.columns.length) merged.tables.set(t.name, t); // live API wins
@@ -190,18 +198,35 @@ async function loadSchema(client, token, notes, sourceDir, log) {
     if (who === 'anon' && s.tables.length === 0) notes.push('The anon role sees no tables in the API schema — good. Tables were discovered as a signed-in user.');
   }
   if (!anyOk) notes.push('Could not read the API schema. Pass tables with --table to test them.');
+  // the live schema and the migrations disagree: say so, the user may be auditing the wrong picture
+  if (live.size && fromSql.size) {
+    const notDeployed = [...fromSql].filter((n) => !live.has(n));
+    const untracked = [...live].filter((n) => !fromSql.has(n));
+    if (notDeployed.length) notes.push(`In your migrations / schema files but not in the live API: ${notDeployed.join(', ')} (not deployed, renamed, or not exposed to the API).`);
+    if (untracked.length)
+      notes.push(`Live tables that are not in your migrations: ${untracked.join(', ')} (created in the dashboard?). They were tested from the live schema; \`supabase db pull\` brings them into migrations.`);
+  }
   return { tables: [...merged.tables.values()], rpcs: [...merged.rpcs] };
 }
 
-async function cleanupUsers(client, users, rpc, notes) {
+async function cleanupUsers(client, users, rpc, notes, reuseKey) {
+  if (!rpc && users.some((u) => u.reused)) notes.push(`Reused the test users from an earlier run (${users.map((u) => u.email).join(', ')}); no new accounts were created.`);
   const created = users.filter((u) => u.created || rpc);
   if (!created.length) return;
   if (rpc) {
+    if (reuseKey) forgetUsers('supabase', reuseKey);
     for (const u of created) {
       const r = await client.request('POST', `/rest/v1/rpc/${encodeURIComponent(rpc)}`, { token: u.token, body: {} });
       if (r.ok) notes.push(`Test user ${u.email} deleted with ${rpc}().`);
       else notes.push(`Could not delete test user ${u.email} with ${rpc}() (${r.status} ${msg(r.data)}) — delete it in Dashboard → Authentication → Users.`);
     }
+    return;
+  }
+  if (reuseKey && saveUsers('supabase', reuseKey, users)) {
+    notes.push(
+      `Test users kept for the next run: ${created.map((u) => u.email).join(', ')}. They are saved outside your project (${usersFile()}), ` +
+        'so later runs sign in with them instead of creating new accounts. Delete them in Dashboard → Authentication → Users when you no longer need them.',
+    );
     return;
   }
   notes.push(`Test users were created: ${created.map((u) => u.email).join(', ')} — delete them in Dashboard → Authentication → Users.`);

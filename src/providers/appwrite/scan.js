@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { AppwriteClient, looksLikeAppwrite, normalizeEndpoint } from './client.js';
 import { scanSource, fromCode } from './source.js';
 import { CONFIG_FILES } from './config.js';
+import { withReusableUsers, saveUsers, usersFile } from '../../core/test-users.js';
 import { setupUsers, deleteUsers, probeCollections, probeBuckets } from './probes.js';
 
 export const id = 'appwrite';
@@ -157,7 +158,9 @@ export async function scan(opts, { site, log }) {
   const client = new AppwriteClient({ url, projectId });
 
   log(`→ Signing in two test users (A and B) on Appwrite project "${projectId}" (${url})`);
-  const users = await setupUsers(client, { userA: opts.userA, userB: opts.userB, emailDomain: opts.emailDomain, log });
+  const { users, reuse } = await withReusableUsers({ platform: 'appwrite', target: `${url} ${projectId}`, opts, log }, (userA, userB) =>
+    setupUsers(client, { userA, userB, emailDomain: opts.emailDomain, log }),
+  );
   try {
     log('→ Testing collections');
     const cols = await probeCollections(client, targets, users, { log, configFile });
@@ -197,6 +200,15 @@ export async function scan(opts, { site, log }) {
     };
   } finally {
     log('→ Cleaning up test users');
-    await deleteUsers(client, users, notes);
+    // reusable test users stay active for the next run instead of piling up as blocked accounts
+    const keep = reuse && users.some((u) => u.created) && saveUsers('appwrite', `${url} ${projectId}`, users);
+    if (users.some((u) => u.reused)) notes.push(`Reused the test users from an earlier run (${users.map((u) => u.email).join(', ')}); no new accounts were created.`);
+    if (keep) {
+      notes.push(
+        `Test users kept for the next run: ${users.filter((u) => u.created).map((u) => u.email).join(', ')}. They are saved outside your project (${usersFile()}), ` +
+          'so later runs sign in with them instead of creating new accounts. Delete them in the Appwrite Console → Auth → Users when you no longer need them.',
+      );
+    }
+    await deleteUsers(client, users, notes, { keep });
   }
 }

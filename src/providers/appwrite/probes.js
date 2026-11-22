@@ -95,7 +95,7 @@ export async function setupUsers(client, { userA, userB, emailDomain = 'example.
       const me = await client.account(s.auth);
       if (!ok(me) || !me.data?.$id) throw fail(`User ${label} signed in, but GET /v1/account failed (${me.status} ${msg(me.data)}) — MFA may be required.`);
       const u = users.find((x) => x.label === label) || { label, email, created };
-      Object.assign(u, { id: me.data.$id, auth: s.auth });
+      Object.assign(u, { id: me.data.$id, auth: s.auth, password });
       if (!users.includes(u)) users.push(u);
     }
     return users;
@@ -104,12 +104,12 @@ export async function setupUsers(client, { userA, userB, emailDomain = 'example.
 
 // Appwrite clients cannot delete their own account. Test users block themselves instead (that
 // also ends their sessions) and the report lists them for deletion in the console.
-export async function deleteUsers(client, users, notes) {
+export async function deleteUsers(client, users, notes, { keep = false } = {}) {
   const blocked = [];
   const left = [];
   for (const u of users) {
     if (!u.auth) continue;
-    if (!u.created) {
+    if (!u.created || keep) {
       await client.signOut(u.auth);
       continue;
     }

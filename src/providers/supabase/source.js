@@ -9,8 +9,10 @@ import { join, extname } from 'node:path';
 const SKIP_DIRS = new Set(['node_modules', '.git', 'build', 'dist', '.gradle', '.next', '.idea', '.vercel', 'out', 'coverage', '.turbo']);
 const CODE_EXT = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.vue', '.svelte', '.kt', '.java', '.dart', '.swift', '.py', '.go', '.rb', '.php', '.cs']);
 
-export async function scanSource(dir) {
-  const files = await walk(dir);
+// extraSql: schema files passed with --schema (e.g. `supabase db dump` output), read in addition
+export async function scanSource(dir, extraSql = []) {
+  const files = dir ? await walk(dir) : [];
+  for (const f of extraSql) if (!files.includes(f)) files.push(f);
   const tables = new Map(); // name -> {columns, pkCols}
   const names = new Set();
   const rpcs = new Set();
@@ -60,9 +62,12 @@ export function sourceToDefinitions(src) {
   return { definitions, paths };
 }
 
+const PUB = String.raw`(?:"?public"?\.)?`;
+
 function parseSql(sql, tables) {
   const clean = sql.replace(/--[^\n]*/g, '');
-  const createRe = /create\s+table\s+(?:if\s+not\s+exists\s+)?(?:public\.)?"?(\w+)"?\s*\(/gi;
+  // migrations write public.notes or notes; pg_dump / supabase db dump writes "public"."notes"
+  const createRe = new RegExp(String.raw`create\s+(?:unlogged\s+)?table\s+(?:if\s+not\s+exists\s+)?${PUB}"?(\w+)"?\s*\(`, 'gi');
   let m;
   while ((m = createRe.exec(clean))) {
     const body = balanced(clean, createRe.lastIndex - 1);
@@ -72,17 +77,24 @@ function parseSql(sql, tables) {
     tables.set(m[1], t);
   }
   // views: only the name is needed, they are tested by looking for A's rows in their output
-  const viewRe = /create\s+(?:or\s+replace\s+)?(?:temp(?:orary)?\s+)?(?:recursive\s+)?view\s+(?:if\s+not\s+exists\s+)?(?:public\.)?"?(\w+)"?/gi;
+  const viewRe = new RegExp(String.raw`create\s+(?:or\s+replace\s+)?(?:temp(?:orary)?\s+)?(?:recursive\s+)?view\s+(?:if\s+not\s+exists\s+)?${PUB}"?(\w+)"?(?![\w".])`, 'gi');
   while ((m = viewRe.exec(clean))) {
     if (!tables.has(m[1])) tables.set(m[1], { columns: new Map(), pkCols: new Set(), nameOnly: true, isView: true });
   }
-  const alterRe = /alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?:public\.)?"?(\w+)"?\s+([^;]+);/gi;
+  const alterRe = new RegExp(String.raw`alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?${PUB}"?(\w+)"?(?![\w".])\s+([^;]+);`, 'gi');
   while ((m = alterRe.exec(clean))) {
     const t = tables.get(m[1]);
     if (!t) continue;
     for (const part of splitTop(m[2])) {
-      const a = part.trim().match(/^add\s+column\s+(?:if\s+not\s+exists\s+)?(.*)$/is);
+      const p = part.trim();
+      const a = p.match(/^add\s+column\s+(?:if\s+not\s+exists\s+)?(.*)$/is);
       if (a) parseColumnOrConstraint(a[1], t);
+      // pg_dump adds keys and identities after the CREATE TABLE
+      else if (/^add\s+(constraint|primary|foreign)\b/i.test(p)) parseColumnOrConstraint(p.replace(/^add\s+/i, ''), t);
+      else {
+        const d = p.match(/^alter\s+column\s+"?(\w+)"?\s+(?:add\s+generated|set\s+default)\b/i);
+        if (d && t.columns.has(d[1])) t.columns.get(d[1]).hasDefault = true;
+      }
     }
   }
 }
@@ -90,12 +102,12 @@ function parseSql(sql, tables) {
 function parseColumnOrConstraint(def, t) {
   if (!def) return;
   const low = def.toLowerCase();
-  const pkTable = low.match(/^(?:constraint\s+\w+\s+)?primary\s+key\s*\(([^)]+)\)/);
+  const pkTable = low.match(/^(?:constraint\s+"?[\w$]+"?\s+)?primary\s+key\s*\(([^)]+)\)/);
   if (pkTable) {
     pkTable[1].split(',').forEach((c) => t.pkCols.add(c.trim().replace(/"/g, '')));
     return;
   }
-  const fkTable = def.match(/^(?:constraint\s+\w+\s+)?foreign\s+key\s*\(\s*"?(\w+)"?\s*\)\s*references\s+(?:"?(\w+)"?\.)?"?(\w+)"?\s*\(\s*"?(\w+)"?\s*\)/i);
+  const fkTable = def.match(/^(?:constraint\s+"?[\w$]+"?\s+)?foreign\s+key\s*\(\s*"?(\w+)"?\s*\)\s*references\s+(?:"?(\w+)"?\.)?"?(\w+)"?\s*\(\s*"?(\w+)"?\s*\)/i);
   if (fkTable) {
     const c = t.columns.get(fkTable[1]);
     if (c) c.fk = { table: fkName(fkTable[2], fkTable[3]), column: fkTable[4] };
@@ -122,6 +134,9 @@ function fkName(schema, table) {
 }
 
 function normalizeType(r) {
+  const custom = r.match(/^"?\w+"?\."?(\w+)"?/); // schema-qualified type (an enum or domain)
+  if (custom) return custom[1];
+  r = r.replace(/^"(\w+)"/, '$1'); // pg_dump quotes some type names: "uuid", "text"
   if (/^(big)?serial/.test(r)) return r.startsWith('big') ? 'bigint' : 'integer';
   if (/^(character varying|varchar)/.test(r)) return 'character varying';
   if (/^timestamptz|^timestamp\s+with\s+time\s+zone/.test(r)) return 'timestamp with time zone';

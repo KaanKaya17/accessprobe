@@ -178,8 +178,26 @@ npx accessprobe --url ... --anon-key ... --source . \
 `supabase/migrations/*.sql` (columns, types, keys, `NOT NULL`, foreign keys) and from your app code
 (`.from("table")`, `rest/v1/table`, `.rpc("fn")`). Your code stays on your machine.
 
+**Migrations don't match production?** When the API schema is readable, the live schema wins and
+accessprobe tells you which tables exist only in your migrations or only in the live database. A table
+named in your migrations or code that the live database doesn't have is reported as drift, not
+tested. When only the `service_role` key can read the schema, give it a dump of the live database:
+
+```bash
+supabase db dump -f live-schema.sql          # the linked project's live schema
+npx accessprobe --url ... --anon-key ... --schema live-schema.sql
+```
+
 It also understands apps that keep their own `users`/`profiles` table, where `user_id` points at
 that table's id instead of `auth.uid()`. Fix SQL is generated with that mapping too.
+
+**Test users.** With only the anon key, accessprobe can't delete the two test users it signs up. It
+keeps them for the next run instead of piling up accounts: they are saved outside your project
+(`~/.cache/accessprobe/test-users.json`), and later runs sign in with them. The report names them, so
+you can delete them in the dashboard when you're done. Other options: `--user-a`/`--user-b` with two
+accounts you made yourself, `--cleanup-rpc <fn>` if your API has a "delete my account" function, or
+`--fresh-users` for new accounts every run. Appwrite works the same way. Firebase and PocketBase test
+users delete themselves.
 
 **Firebase:**
 
