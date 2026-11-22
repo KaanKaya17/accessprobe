@@ -155,7 +155,7 @@ export async function scan(opts, { site, log }) {
     );
   }
   const { targets, buckets } = buildTargets(src, opts, notes);
-  const client = new AppwriteClient({ url, projectId });
+  const client = new AppwriteClient({ url, projectId, readOnly: opts.readOnly });
 
   log(`→ Signing in two test users (A and B) on Appwrite project "${projectId}" (${url})`);
   const { users, reuse } = await withReusableUsers({ platform: 'appwrite', target: `${url} ${projectId}`, opts, log }, (userA, userB) =>

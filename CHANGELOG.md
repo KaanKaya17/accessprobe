@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-22
+
+### Added
+- **`--read-only`** (MCP: `read_only`), for production and for tables with triggers, database webhooks or Cloud Functions you don't want to fire. No request that could change anything is sent: inserts, updates, deletes, uploads, RPC calls and sign-ups are stopped in the client before they leave the process, on all four platforms. It needs two existing accounts (`--user-a`, `--user-b`). Anonymous reads and B's reads of other users' existing rows are still tested; write checks are listed as not run and never reported as passed. A blocked write looks like a network error to the probes, which already count that as inconclusive.
+- **`.accessprobeignore`** (or `--ignore-file`; MCP: `ignore_file`) for findings that are open on purpose. One `<resource> [finding id]  # reason` per line. Accepted findings are shown in their own section with the reason, don't count for the grade or the exit code, and their failing checks are left out of the `--pgtap` / `--rules-tests` files. Entries that matched nothing are listed in the notes.
+- The ownership prompt says that inserts fire triggers and webhooks, and points to `--read-only`.
+- `real-supabase` e2e: a `--read-only` run against real Postgres must leave every public table, storage object and auth user exactly as it was (content fingerprint before and after).
+
 ## [0.9.0] - 2026-11-22
 
 ### Added

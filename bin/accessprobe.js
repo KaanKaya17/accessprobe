@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { scan, plan } from '../src/core/scan.js';
 import { printReport, markdownReport, grade, color } from '../src/core/report.js';
+import { loadAccept } from '../src/core/accept.js';
 
 const HELP = `
 accessprobe — prove your backend's access rules actually work (Supabase, Firebase, PocketBase, Appwrite)
@@ -70,6 +71,16 @@ Common
   --fresh-users          Supabase / Appwrite: sign up new test users and keep none.
                          By default the two test users are saved outside your project
                          (~/.cache/accessprobe) and reused, so runs don't pile up accounts.
+  --read-only            Send no request that could change anything: no sign-ups, rows,
+                         files or RPC calls. Needs --user-a and --user-b. Checks what
+                         anonymous visitors and user B can read of the data already
+                         there; write checks are skipped (for production, or tables
+                         with triggers / webhooks you don't want to fire).
+  --ignore-file <f>      Findings that are open on purpose (default: .accessprobeignore
+                         in --source or this folder). One per line:
+                           profiles  cross-user-read   # public profiles, by design
+                         They are listed as "Accepted" and don't count for the grade
+                         or the exit code, or fail the --pgtap / --rules-tests files.
   --cleanup-rpc <fn>     At the end, call this RPC as each test user to delete them
                          (e.g. delete_my_account). Also applies to --user-a/--user-b!
   --table <name>         Also test this table / collection (repeatable; for when the
@@ -106,6 +117,8 @@ const OPTIONS = {
   'email-domain': { type: 'string' },
   'fresh-users': { type: 'boolean' },
   'cleanup-rpc': { type: 'string' },
+  'read-only': { type: 'boolean' },
+  'ignore-file': { type: 'string' },
   source: { type: 'string' },
   platform: { type: 'string' },
   'project-id': { type: 'string' },
@@ -175,8 +188,24 @@ function looksLikeProject(dir) {
   ].some((f) => existsSync(join(dir, f)));
 }
 
+if (v['read-only'] && !(v['user-a'] && v['user-b'])) {
+  console.error('--read-only needs two existing test accounts: --user-a email:password --user-b email:password\n(signing up new users would be a write).');
+  process.exit(2);
+}
+
+let accept;
+try {
+  accept = await loadAccept({ file: v['ignore-file'], source: v.source });
+} catch (e) {
+  console.error(color.red(`Error: ${e.message}`));
+  process.exit(2);
+}
+if (accept.file && !v.quiet && !v.json) console.error(color.dim(`Accepted findings: ${accept.entries.length} in ${accept.file}`));
+
 const opts = {
   site: v.site,
+  readOnly: v['read-only'],
+  accept,
   url: v.url,
   anonKey: v['anon-key'],
   schemaFiles: v.schema,
@@ -212,7 +241,14 @@ const targets = prepared.targets.map((t) => t.target);
 console.error(`Target: ${targets.join(' + ')}`);
 
 if (!v.yes) {
-  console.error(color.yellow('accessprobe creates two test users and test rows/files in the target project, then removes the test data.'));
+  console.error(
+    color.yellow(
+      v['read-only']
+        ? 'Read-only: accessprobe signs in as your two test users and only reads; nothing is created, changed or deleted.'
+        : 'accessprobe creates two test users and test rows/files in the target project, then removes the test data.\n' +
+            'Inserts fire your triggers and webhooks like real ones; use --read-only where that matters.',
+    ),
+  );
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   // closed stdin (CI without --yes) must abort, not hang
   const a = await new Promise((resolve) => {

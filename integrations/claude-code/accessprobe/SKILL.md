@@ -24,6 +24,14 @@ Supabase URL or Firebase project; show it to the user. If accessprobe stops beca
 are configured (for example `.env` and `.env.local`, or dev and prod), **ask the user which one to
 test** and pass `--url` / `--project-id`. Never pick production yourself.
 
+If the user does want to check production, use `--read-only` with two accounts they give you
+(`--user-a`, `--user-b`): normal runs insert real rows, which fire triggers, webhooks and Cloud
+Functions. A read-only report skips every write check, so never call it a clean bill of health.
+
+Only add a line to `.accessprobeignore` (findings that are open on purpose) after the user confirms
+that resource is meant to be shared, and write their reason after `#`. Never add one to make a run
+pass.
+
 ## 2. Run it
 
 From the app's project folder (where `supabase/`, `firestore.rules`, `google-services.json`, `pb_migrations/` or `appwrite.json` live):

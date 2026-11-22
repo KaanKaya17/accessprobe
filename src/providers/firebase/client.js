@@ -2,6 +2,8 @@
 // Talks exactly like a browser client with a user's ID token, so Security Rules apply.
 
 // emulator: { auth, firestore, database, storage } base URLs, e.g. "http://127.0.0.1:9099"
+import { readOnlyBlock } from '../../core/read-only.js';
+
 export const DEFAULT_EMULATOR = {
   auth: 'http://127.0.0.1:9099',
   firestore: 'http://127.0.0.1:8080',
@@ -31,7 +33,8 @@ export function endpoints(cfg, emulator) {
 }
 
 export class FirebaseClient {
-  constructor(cfg, { emulator, timeoutMs = 15000 } = {}) {
+  constructor(cfg, { emulator, timeoutMs = 15000, readOnly = false } = {}) {
+    this.readOnly = readOnly;
     this.cfg = cfg;
     this.ep = endpoints(cfg, emulator);
     this.timeoutMs = timeoutMs;
@@ -54,6 +57,8 @@ export class FirebaseClient {
       .replace(this.ep.firestore, '…/documents')
       .replace(this.ep.storage || '\u0000', '…')
       .replace(/^https?:\/\/[^/]+(?=\/[^?]*\.json)/, '');
+    const blocked = this.readOnly && readOnlyBlock(method, url.startsWith('http') ? new URL(url).pathname + new URL(url).search : url);
+    if (blocked) return { ok: false, status: 0, data: { error: blocked }, evidence: `${method} ${shown} → ${blocked}` };
     let res;
     let text;
     try {

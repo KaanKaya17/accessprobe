@@ -98,7 +98,7 @@ export async function scan(opts, { site, log }) {
 
   const emulator = opts.emulator ? (typeof opts.emulator === 'object' ? opts.emulator : DEFAULT_EMULATOR) : null;
   if (emulator) notes.push('Ran against the Firebase Emulator Suite: token checks, App Check and API-key restrictions are not enforced there.');
-  const client = new FirebaseClient(cfg, { emulator });
+  const client = new FirebaseClient(cfg, { emulator, readOnly: opts.readOnly });
 
   // 2. users
   log(`→ Signing in two test users (A and B) on Firebase project "${cfg.projectId}"`);

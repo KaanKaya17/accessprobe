@@ -9,6 +9,7 @@ import { writeFile } from 'node:fs/promises';
 import { scan, plan } from '../core/scan.js';
 import { markdownReport, grade } from '../core/report.js';
 import { fixCode } from '../core/prompt.js';
+import { loadAccept, resourceOf } from '../core/accept.js';
 import { writePgtap } from '../providers/supabase/pgtap.js';
 import { writeRulesTests } from '../providers/firebase/rules-tests.js';
 
@@ -44,6 +45,16 @@ const SCAN_PROPS = {
   user_b: { type: 'string', description: 'Existing test user B as email:password.' },
   email_domain: { type: 'string', description: 'Domain for auto-created test users (default: example.com).' },
   fresh_users: { type: 'boolean', description: 'Supabase / Appwrite: sign up new test users instead of reusing the ones saved by an earlier run.' },
+  read_only: {
+    type: 'boolean',
+    description:
+      'Send no request that could change anything (no sign-ups, rows, files, RPC calls); needs user_a and user_b. Only reads are tested, write checks are skipped. Use it for production or tables with triggers / webhooks.',
+  },
+  ignore_file: {
+    type: 'string',
+    description:
+      'Findings that are open on purpose (default: .accessprobeignore in the project). Lines like "profiles cross-user-read  # public by design". They are reported as accepted and not graded. Only add entries the user confirmed are intended.',
+  },
   cleanup_rpc: { type: 'string', description: 'Supabase RPC each test user calls at the end to delete itself (e.g. delete_my_account).' },
   report_file: { type: 'string', description: 'Also write the Markdown report to this file (relative to directory).' },
   pgtap_file: {
@@ -108,6 +119,7 @@ export function toOptions(args = {}, cwd = process.cwd()) {
       emailDomain: args.email_domain,
       freshUsers: args.fresh_users,
       cleanupRpc: args.cleanup_rpc,
+      readOnly: args.read_only === true,
       source,
       platform: args.platform,
       projectId: args.project_id,
@@ -148,6 +160,8 @@ async function callTool(name, args, cwd) {
       );
     }
     const { dir, opts } = toOptions(args, cwd);
+    if (opts.readOnly && !(opts.userA && opts.userB)) return toolError('read_only needs user_a and user_b: signing up new test users would be a write.');
+    opts.accept = await loadAccept({ file: args.ignore_file && resolve(dir, args.ignore_file), source: opts.source || dir });
     const result = await scan(opts);
     const md = markdownReport(result);
     if (args.report_file) await writeFile(resolve(dir, args.report_file), md, 'utf8');
@@ -173,6 +187,7 @@ async function callTool(name, args, cwd) {
         fix: fixCode(f) ?? undefined,
         fixSteps: f.fix?.steps,
       })),
+      accepted: (result.accepted || []).map((f) => ({ id: f.id, platform: f.platform, resource: resourceOf(f), title: f.title, reason: f.acceptedBecause })),
       passed: result.passed,
       notes: result.notes,
       stats: result.stats,

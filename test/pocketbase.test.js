@@ -8,6 +8,7 @@ import { available, startPocketBase, APP_DIR, POCKETBASE_VERSION } from './pocke
 import { scan } from '../src/core/scan.js';
 import { grade, markdownReport } from '../src/core/report.js';
 import * as pocketbase from '../src/providers/pocketbase/index.js';
+import { recordRequests, assertReadOnly } from './read-only-helper.js';
 
 let pb = null;
 let result = null;
@@ -161,6 +162,25 @@ t('--user-a/--user-b: existing test users are used and never deleted', async () 
     const left = await pb.admin('GET', '/api/collections/users/records?perPage=1');
     assert.equal(left.data.totalItems, 2, 'the given users still exist');
     assert.equal((await pb.admin('GET', '/api/collections/notes/records?perPage=1')).data.totalItems, 0);
+  } finally {
+    for (const id of ids) await pb.admin('DELETE', `/api/collections/users/records/${id}`);
+  }
+});
+
+t('--read-only: only reads go out, and nothing is claimed for the skipped writes', async () => {
+  const pw = 'Existing-Passw0rd-1';
+  const emails = ['ro-a@example.com', 'ro-b@example.com'];
+  const ids = [];
+  for (const email of emails) {
+    const r = await pb.admin('POST', '/api/collections/users/records', { email, password: pw, passwordConfirm: pw });
+    assert.ok(r.ok, JSON.stringify(r.data));
+    ids.push(r.data.id);
+  }
+  try {
+    const run = await recordRequests(() => scan({ url: pb.url, source: APP_DIR, userA: `${emails[0]}:${pw}`, userB: `${emails[1]}:${pw}`, readOnly: true, quiet: true }));
+    assertReadOnly(run);
+    // posts are public by rule: still visible without writing anything
+    assert.ok(run.result.findings.some((f) => f.resource === 'posts') || run.result.notes.some((n) => n.includes('posts')));
   } finally {
     for (const id of ids) await pb.admin('DELETE', `/api/collections/users/records/${id}`);
   }

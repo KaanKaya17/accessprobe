@@ -2,13 +2,18 @@
 // (anonymous) or a regular user's auth token, so the collection API rules apply.
 // accessprobe never asks for, accepts or uses superuser (admin) credentials.
 
+import { readOnlyBlock } from '../../core/read-only.js';
+
 export class PocketBaseClient {
-  constructor({ url, timeoutMs = 15000 }) {
+  constructor({ url, timeoutMs = 15000, readOnly = false }) {
+    this.readOnly = readOnly;
     this.url = url.replace(/\/+$/, '');
     this.timeoutMs = timeoutMs;
   }
 
   async request(method, path, { token, body } = {}) {
+    const blocked = this.readOnly && readOnlyBlock(method, path);
+    if (blocked) return { ok: false, status: 0, data: { message: blocked }, evidence: `${method} ${path} → ${blocked}` };
     const headers = {};
     if (token) headers.Authorization = token;
     let payload;

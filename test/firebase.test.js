@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { available, startEmulators, PROJECT_ID } from './firebase/emulator.js';
 import { scan } from '../src/core/scan.js';
 import { grade, markdownReport } from '../src/core/report.js';
+import { recordRequests, assertReadOnly } from './read-only-helper.js';
 import { rulesTests } from '../src/providers/firebase/rules-tests.js';
 
 const SOURCE = fileURLToPath(new URL('./firebase/', import.meta.url));
@@ -63,9 +64,9 @@ after(async () => {
 });
 
 const t = (name, fn) =>
-  test(name, (ctx) => {
+  test(name, async (ctx) => {
     if (skipReason) return ctx.skip(skipReason);
-    fn();
+    await fn();
   });
 const has = (id, res) => result.findings.some((f) => f.id === id && (!res || f.resource === res));
 const on = (res) => result.findings.filter((f) => f.resource === res);
@@ -236,4 +237,24 @@ t('rules tests: every clear verdict becomes a test; proven leaks are marked to f
   assert.equal(find("Realtime Database /users/$uid: B cannot read A's data")?.failsNow, true);
   assert.ok(!find("public_posts: B cannot read A's documents"), 'public by design: no verdict, no test');
   assert.ok(!/\{A\}|\{marker\}/.test(code.replace(/\$\{A\}/g, '')), 'placeholders are filled');
+});
+
+t('--read-only: only reads go out, and nothing is claimed for the skipped writes', async () => {
+  const pw = 'Existing-Passw0rd-1';
+  const creds = [];
+  for (const email of ['ro-a@example.com', 'ro-b@example.com']) {
+    const r = await fetch(`${emu.hosts.auth}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pw, returnSecureToken: true }),
+    });
+    assert.ok(r.ok, `sign-up ${email}: ${r.status}`);
+    creds.push(`${email}:${pw}`);
+  }
+  const run = await recordRequests(() =>
+    scan({ platform: 'firebase', projectId: PROJECT_ID, apiKey: 'fake-api-key', source: SOURCE, emulator: true, userA: creds[0], userB: creds[1], readOnly: true, quiet: true }),
+  );
+  assertReadOnly(run);
+  // the seeded backup is readable by any signed-in user: found without writing anything
+  assert.ok(run.result.findings.length > 0);
 });

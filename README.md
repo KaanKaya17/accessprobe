@@ -320,6 +320,39 @@ The rules are read from your project files (paths from `firebase.json` when pres
 `firebase emulators:exec` the emulator hosts and project id come from its environment; otherwise the
 ports in `firebase.json` (or the defaults) are used. Re-generate the file after rules changes.
 
+## Production: `--read-only`
+
+Every insert accessprobe makes is a real insert: your triggers, database webhooks and Cloud
+Functions fire as they would for a user (a "new order" email, a Slack message, a Stripe call).
+Against production, or tables where that matters, use `--read-only`:
+
+```bash
+npx accessprobe --source . --read-only --user-a a@your-app.com:pw --user-b b@your-app.com:pw
+```
+
+No request that could change anything is sent: no sign-ups (so it needs two existing accounts), rows,
+files or RPC calls. Writes are stopped before they leave the process. What still runs is everything
+that only reads: whether anonymous visitors can read your data, and whether user B can read rows that
+belong to other users. Write checks (change, delete, forge, upload) are listed as not run, never as
+passed, so a clean read-only report is not a clean bill of health. Run the full test against a local or
+staging copy.
+
+## Things that are open on purpose: `.accessprobeignore`
+
+A public `profiles` table or a product catalog is reported every run, and a CI job that fails on it
+stays red. List those in `.accessprobeignore` in your project folder (or pass `--ignore-file`):
+
+```text
+# <table / collection / bucket>  [finding id]   # why
+profiles   cross-user-read   # profiles are public in this app
+products                     # the whole catalog is public
+```
+
+They move to an "Accepted" section with your reason, stop counting for the grade and the exit code,
+and their failing checks are left out of `--pgtap` / `--rules-tests` files. Without a finding id every
+finding on that resource is accepted, so prefer naming the id: a new kind of leak on the same table
+still fails. Lines that no longer match anything are pointed out in the notes.
+
 ## Run it on every pull request (GitHub Action)
 
 Test your rules in CI against a **local** backend started from your repository, so every policy or rules change is attacked before it ships. Production is never touched.
@@ -343,7 +376,7 @@ jobs:
           eval "$(supabase status -o env)"
           echo "SB_URL=$API_URL" >> "$GITHUB_ENV"
           echo "SB_ANON=${ANON_KEY:-$PUBLISHABLE_KEY}" >> "$GITHUB_ENV"
-      - uses: KaanKaya17/accessprobe@v0.9.0
+      - uses: KaanKaya17/accessprobe@v0.10.0
         with:
           args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source .
 ```
@@ -355,7 +388,7 @@ jobs:
         with: { distribution: temurin, java-version: '21' }
       - run: npx firebase-tools emulators:start --only auth,firestore,database,storage --project demo-ci &
       - run: npx wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099
-      - uses: KaanKaya17/accessprobe@v0.9.0
+      - uses: KaanKaya17/accessprobe@v0.10.0
         with:
           args: --project-id demo-ci --api-key fake --source . --emulator
 ```
@@ -395,7 +428,7 @@ npm run demo          # in a second terminal
 ## Rules
 
 **Only test apps you own or are authorized to test.** accessprobe creates users and data in the target
-project. It asks you to confirm ownership before every run unless you pass `--yes`.
+project (unless you pass `--read-only`). It asks you to confirm ownership before every run unless you pass `--yes`.
 
 ## Roadmap
 
@@ -405,6 +438,7 @@ project. It asks you to confirm ownership before every run unless you pass `--ye
 - [x] Turn findings into permanent pgTAP regression tests (`--pgtap`)
 - [x] Firebase: anonymous-auth attacker, and findings as Security Rules regression tests (`--rules-tests`)
 - [x] MCP server: agents run it after every schema change (`npx accessprobe mcp`)
+- [x] `--read-only` for production, and `.accessprobeignore` for things that are open on purpose
 - [ ] Edge Function checks (auth required? cross-user IDs?)
 - [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)
 - [x] Privilege escalation (users editing their own `role` / `plan`) and views that skip RLS
