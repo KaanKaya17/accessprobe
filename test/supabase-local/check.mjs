@@ -32,6 +32,15 @@ expect(feed.length > 0 && feed.every((f) => !f.fix || /security_invoker = true/.
 expect(none('my_notes'), 'my_notes: security_invoker view, no findings');
 expect(passed("my_notes: B cannot read A's private rows through it"), 'my_notes: B sees nothing through it (passed)');
 
+const fnHas = (fn, id) => r.findings.some((f) => f.resource === fn && f.id === id && (id.startsWith('definer-') || f.severity === 'critical'));
+expect(fnHas('all_notes_definer', 'rpc-cross-user-read'), 'all_notes_definer(): SECURITY DEFINER function leaking A\'s notes to B is proven');
+expect(fnHas('all_notes_definer', 'rpc-anon-read'), 'all_notes_definer(): ... and to anonymous visitors');
+expect(!r.findings.some((f) => f.resource === 'all_notes_definer' && f.id === 'definer-no-auth-check'), 'all_notes_definer(): proven live, so no extra static warning');
+expect(!r.findings.some((f) => f.resource === 'notes_invoker'), 'notes_invoker(): invoker rights, no findings');
+expect(passed("notes_invoker(): B gets none of A's private rows"), 'notes_invoker(): B gets nothing through it (passed)');
+const wipe = r.findings.find((f) => f.resource === 'wipe_canary' && f.id === 'definer-no-auth-check');
+expect(Boolean(wipe) && /does not remove the anon/.test(wipe.detail), 'wipe_canary(): static SECURITY DEFINER warning, notes that REVOKE FROM public is not enough');
+
 expect(!r.notes.some((n) => n.startsWith('Could not delete')), 'cleanup removed every test row');
 
 if (errors.length) {

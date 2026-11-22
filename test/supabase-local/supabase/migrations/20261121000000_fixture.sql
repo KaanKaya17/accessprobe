@@ -56,3 +56,25 @@ create view public.notes_feed as select id, user_id, body from public.notes;
 create view public.my_notes with (security_invoker = true) as select id, user_id, body from public.notes;
 
 grant select on public.notes_feed, public.my_notes to anon, authenticated;
+
+-- BROKEN: SECURITY DEFINER runs as postgres and skips the RLS of notes (callable with GET: stable).
+create function public.all_notes_definer() returns setof public.notes
+  language sql stable security definer set search_path = ''
+  as $$ select * from public.notes $$;
+
+-- CORRECT: invoker rights, so the caller's RLS applies.
+create function public.notes_invoker() returns setof public.notes
+  language sql stable
+  as $$ select * from public.notes $$;
+
+-- STATIC WARNING: a SECURITY DEFINER function that never checks the caller and changes data.
+-- accessprobe must never run it: GET is a read-only transaction, POST is never sent.
+-- The canary row proves it in CI.
+create table public.canary (id int primary key);
+alter table public.canary enable row level security;
+insert into public.canary values (1);
+create function public.wipe_canary() returns void
+  language sql security definer
+  as $$ delete from public.canary where true $$;
+-- revoking from public alone leaves Supabase's anon / authenticated grants in place
+revoke execute on function public.wipe_canary() from public;

@@ -202,6 +202,11 @@ function makeState() {
       notes_feed: { base: 'notes', invoker: false },
       my_notes: { base: 'notes', invoker: true },
     },
+    // RPCs readable with GET: a SECURITY DEFINER one skips the table's RLS, an invoker one applies it
+    functions: {
+      all_notes: { base: 'notes', definer: true }, // BUG: returns every user's notes
+      notes_of_mine: { base: 'notes', definer: false },
+    },
     seq: 100,
     buckets: {
       avatars: {
@@ -234,6 +239,7 @@ function makeState() {
 function openapi(S) {
   const definitions = {};
   const paths = { '/': {}, '/rpc/delete_everything': { post: {} } };
+  for (const name of Object.keys(S.functions)) paths[`/rpc/${name}`] = { get: {}, post: {} };
   for (const [name, t] of Object.entries(S.tables)) {
     const properties = {};
     const required = [];
@@ -324,6 +330,21 @@ export function createServer({ autoconfirm = true } = {}) {
 
     // ---------- PostgREST ----------
     if (u.pathname === '/rest/v1/' && req.method === 'GET') return send(200, openapi(S));
+    // pg_graphql: introspection lists every table the role may select (rows would still be RLS-filtered)
+    if (u.pathname === '/graphql/v1' && req.method === 'POST') {
+      const { query } = JSON.parse((await body(req)) || '{}');
+      if (!/__schema/.test(query || '')) return send(200, { errors: [{ message: 'mock: introspection only' }] });
+      const fields = [{ name: 'node' }, ...Object.keys(S.tables).filter((n) => n !== 'counters').map((n) => ({ name: `${n}Collection` }))];
+      return send(200, { data: { __schema: { queryType: { fields } } } });
+    }
+    const fm = u.pathname.match(/^\/rest\/v1\/rpc\/([a-z_]+)$/);
+    if (fm) {
+      const fn = S.functions[fm[1]];
+      if (!fn) return send(404, { code: 'PGRST202', message: `Could not find the function public.${fm[1]} without parameters` });
+      if (req.method !== 'GET') return send(405, { message: 'mock: functions are read-only' });
+      const b = S.tables[fn.base];
+      return send(200, b.rows.filter((r) => fn.definer || allow(b, 'select', ctx, r)));
+    }
     const tm = u.pathname.match(/^\/rest\/v1\/([a-z_]+)$/);
     if (tm) {
       const view = S.views[tm[1]];

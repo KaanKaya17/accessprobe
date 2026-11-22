@@ -106,7 +106,9 @@ The server runs in your project folder by default; pass `directory` to test anot
 | Views | **views that skip RLS**: B (and anonymous visitors) look for A's private test rows in every view. Views without `security_invoker` run with the owner's rights |
 | Storage | anonymous listing, **B downloads A's file**, **B deletes A's file**, public buckets via their public URL |
 | Project config | secret keys in browser-exposed env vars (`VITE_`, `NEXT_PUBLIC_`, `EXPO_PUBLIC_` …) or in client code |
-| Functions | lists RPCs exposed over the API for review (never calls them) |
+| Sensitive columns | rows that anonymous visitors or other users can read are checked for **personal data and secrets by column name** (`email`, `phone`, `address`, `stripe_customer_id`, `password_hash`, `api_key`, `*_token` …). RLS works on rows, not columns: a public profile can still hand out the email. Values are never shown |
+| Functions | every exposed RPC is called with **GET and no arguments** as A, B and an anonymous visitor (PostgREST runs GET in a read-only transaction, so nothing is written, and functions that need arguments are not called). **B or a visitor getting A's private rows back through a function** is a proven leak. From the migrations: **`SECURITY DEFINER` functions that never check the caller** (no `auth.uid()` / `auth.jwt()`) and that `anon` / `authenticated` may execute, `REVOKE … FROM public` that leaves Supabase's anon grant in place, and definer functions without a fixed `search_path`. Data-changing functions are never POSTed to |
+| GraphQL | `pg_graphql` introspection as an anonymous visitor: the tables, columns and relations it lists (rows stay behind RLS, the schema does not) |
 
 **Firebase**
 
@@ -376,7 +378,7 @@ jobs:
           eval "$(supabase status -o env)"
           echo "SB_URL=$API_URL" >> "$GITHUB_ENV"
           echo "SB_ANON=${ANON_KEY:-$PUBLISHABLE_KEY}" >> "$GITHUB_ENV"
-      - uses: KaanKaya17/accessprobe@v0.11.0
+      - uses: KaanKaya17/accessprobe@v0.12.0
         with:
           args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source .
 ```
@@ -388,7 +390,7 @@ jobs:
         with: { distribution: temurin, java-version: '21' }
       - run: npx firebase-tools emulators:start --only auth,firestore,database,storage --project demo-ci &
       - run: npx wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099
-      - uses: KaanKaya17/accessprobe@v0.11.0
+      - uses: KaanKaya17/accessprobe@v0.12.0
         with:
           args: --project-id demo-ci --api-key fake --source . --emulator
 ```
@@ -405,7 +407,7 @@ Set `sarif:` and upload the file. Each finding then shows up under **Security �
       security-events: write
     steps:
       # … start the backend as above …
-      - uses: KaanKaya17/accessprobe@v0.11.0
+      - uses: KaanKaya17/accessprobe@v0.12.0
         with:
           args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source .
           sarif: accessprobe.sarif
@@ -469,7 +471,7 @@ project (unless you pass `--read-only`). It asks you to confirm ownership before
 - [x] `--read-only` for production, and `.accessprobeignore` for things that are open on purpose
 - [x] SARIF output for GitHub code scanning (`--sarif`), findings placed on the leaking policy / rule
 - [ ] Team / organization roles (other org, member vs admin, removed member)
-- [ ] Sensitive columns in readable tables, `SECURITY DEFINER` functions, `pg_graphql`
+- [x] Sensitive columns in readable rows, `SECURITY DEFINER` functions (proven through GET, plus a static check), `pg_graphql` schema exposure
 - [ ] Edge Function checks (auth required? cross-user IDs?)
 - [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)
 - [x] Privilege escalation (users editing their own `role` / `plan`) and views that skip RLS

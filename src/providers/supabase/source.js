@@ -18,7 +18,12 @@ export async function scanSource(dir, extraSql = []) {
   const rpcs = new Set();
   const sqlFiles = files.filter((f) => extname(f) === '.sql').sort();
 
-  for (const f of sqlFiles) parseSql(await readFile(f, 'utf8'), tables);
+  const sql = []; // { file, text } in migration order, for functions.js
+  for (const f of sqlFiles) {
+    const text = await readFile(f, 'utf8');
+    sql.push({ file: f, text });
+    parseSql(text, tables);
+  }
 
   for (const f of files.filter((x) => CODE_EXT.has(extname(x)))) {
     const text = await readFile(f, 'utf8');
@@ -38,7 +43,7 @@ export async function scanSource(dir, extraSql = []) {
   // tables referenced in code but missing from migrations: names only
   for (const n of names) if (!tables.has(n)) tables.set(n, { columns: new Map(), pkCols: new Set(), nameOnly: true });
 
-  return { tables, rpcs: [...rpcs], fileCount: files.length, sqlCount: sqlFiles.length };
+  return { tables, rpcs: [...rpcs], sql, fileCount: files.length, sqlCount: sqlFiles.length };
 }
 
 // Convert to the same shape parseSchema() returns (minus owner, which schema.js guesses)

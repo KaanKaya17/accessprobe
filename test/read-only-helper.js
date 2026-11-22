@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 
 // the only non-GET requests a read-only run may send: sign-ins and read-only queries
-const READ_LIKE = /token\?grant_type=password|\/storage\/v1\/object\/list\/|accounts:signInWithPassword|:runQuery|:runAggregationQuery|\/auth-with-password|\/v1\/account\/sessions\/(email|current)/;
+const READ_LIKE = /token\?grant_type=password|\/graphql\/v1$|\/storage\/v1\/object\/list\/|accounts:signInWithPassword|:runQuery|:runAggregationQuery|\/auth-with-password|\/v1\/account\/sessions\/(email|current)/;
 
 export async function recordRequests(fn) {
   const orig = globalThis.fetch;
