@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Test users are reused** (Supabase, Appwrite). With only the public key, accessprobe cannot delete the accounts it signs up, so every run used to leave two more in the project. They are now saved outside the project (`~/.cache/accessprobe/test-users.json`, or `$ACCESSPROBE_CACHE_DIR`) and later runs sign in with them; if they no longer sign in, new ones are created. `--fresh-users` (MCP: `fresh_users`) restores the old behaviour. Appwrite test users are no longer blocked when they are kept.
+- **`--schema <file.sql>`** (Supabase; MCP: `schema_files`): read the live database schema from `supabase db dump`, for when migrations don't match production.
+- **Schema drift notes** (Supabase): tables that exist only in the migrations or only in the live API are listed. A table named in migrations or code that the live database doesn't have is reported as not in the live database instead of being tested.
+
+### Fixed
+- `supabase db dump` / pg_dump schema files were not understood: quoted `"public"."table"` names, primary and foreign keys added with `ALTER TABLE … ADD CONSTRAINT`, identity columns added later, and schema-qualified enum types.
+
 ## [0.8.0] - 2026-11-22
 
 ### Added

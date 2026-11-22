@@ -157,6 +157,7 @@ jobs:
           set -e
           [ "$code" = 1 ] || { cat code-only.json; exit 1; }
           node test/appwrite/check-code-only.mjs code-only.json
+          node -e "const r=require('./code-only.json'); if(!r.notes.some(n=>n.startsWith('Reused the test users'))){console.log(r.notes);process.exit(1)} console.log('second run reused the saved test users')"
       - if: failure()
         run: |
           cat result.json 2>/dev/null | head -c 20000 || true

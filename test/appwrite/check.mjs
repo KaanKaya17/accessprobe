@@ -54,8 +54,9 @@ for (const b of config.buckets) {
   expect(j.total === 0, `cleanup: bucket ${b.$id} has no files left (${j.total ?? JSON.stringify(j)})`);
 }
 const users = await get('/users');
-expect(users.total === 2 && users.users.every((u) => u.status === false), `the 2 test users blocked themselves (${JSON.stringify((users.users || []).map((u) => [u.email, u.status]))})`);
-expect(users.users?.every((u) => r.notes.some((n) => n.includes(u.email))), 'the report lists the test users for deletion');
+expect(users.total === 2 && users.users.every((u) => u.status === true), `the 2 test users stay active for the next run (${JSON.stringify((users.users || []).map((u) => [u.email, u.status]))})`);
+const kept = r.notes.find((n) => n.startsWith('Test users kept for the next run'));
+expect(Boolean(kept) && users.users?.every((u) => kept.includes(u.email)), 'the report says which test users were kept and where');
 
 if (errors.length) {
   console.log('\nFindings:', JSON.stringify(r.findings.map((f) => [f.resource, f.id, f.severity]), null, 1));

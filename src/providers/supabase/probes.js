@@ -70,7 +70,7 @@ export async function setupUsers(client, { userA, userB, emailDomain = 'example.
         );
       throw fail(`Sign-in of user ${s.label} failed (${r.status}): ${msg(r.data)}`);
     }
-    users.push({ label: s.label, email, id: r.data.user.id, token: r.data.access_token, created, ids: {} });
+    users.push({ label: s.label, email, password, id: r.data.user.id, token: r.data.access_token, created, ids: {} });
   }
   return users;
 }
@@ -165,6 +165,11 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
 
     // 1) anonymous read
     const anon = await client.select(t.name);
+    // named in migrations or code, but the live database has no such table (schema drift)
+    if (anon.status === 404 && /PGRST205|42P01/.test(String(anon.data?.code))) {
+      skipped.push(`${t.name}: not in the live database (${anon.data.code}) — your migrations or code and the deployed schema differ; not tested`);
+      continue;
+    }
     const anonCount = anon.ok ? (anon.total ?? (Array.isArray(anon.data) ? anon.data.length : 0)) : 0;
 
     // 2) anonymous write. Insert alone can be intended (guestbook, waitlist);

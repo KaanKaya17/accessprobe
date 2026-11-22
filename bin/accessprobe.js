@@ -36,6 +36,8 @@ Options
 Supabase
   --url <url>            Supabase project URL (skip discovery)
   --anon-key <key>       Public anon / publishable key
+  --schema <file.sql>    The live schema, when migrations don't match production
+                         (repeatable): supabase db dump -f schema.sql
 
 PocketBase
   --url <url>            PocketBase server URL. Never pass admin / superuser
@@ -62,6 +64,9 @@ Common
   --user-a <email:pw>    Existing test user A (default: sign up a new one)
   --user-b <email:pw>    Existing test user B
   --email-domain <d>     Domain for auto-created test users (default: example.com)
+  --fresh-users          Supabase / Appwrite: sign up new test users and keep none.
+                         By default the two test users are saved outside your project
+                         (~/.cache/accessprobe) and reused, so runs don't pile up accounts.
   --cleanup-rpc <fn>     At the end, call this RPC as each test user to delete them
                          (e.g. delete_my_account). Also applies to --user-a/--user-b!
   --table <name>         Also test this table / collection (repeatable; for when the
@@ -90,9 +95,11 @@ const OPTIONS = {
   site: { type: 'string' },
   url: { type: 'string' },
   'anon-key': { type: 'string' },
+  schema: { type: 'string', multiple: true },
   'user-a': { type: 'string' },
   'user-b': { type: 'string' },
   'email-domain': { type: 'string' },
+  'fresh-users': { type: 'boolean' },
   'cleanup-rpc': { type: 'string' },
   source: { type: 'string' },
   platform: { type: 'string' },
@@ -166,9 +173,11 @@ const opts = {
   site: v.site,
   url: v.url,
   anonKey: v['anon-key'],
+  schemaFiles: v.schema,
   userA: v['user-a'],
   userB: v['user-b'],
   emailDomain: v['email-domain'],
+  freshUsers: v['fresh-users'],
   cleanupRpc: v['cleanup-rpc'],
   source: v.source,
   platform: v.platform,
