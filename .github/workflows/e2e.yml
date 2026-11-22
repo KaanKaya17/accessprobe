@@ -147,6 +147,16 @@ jobs:
           echo "exit code $code (1 expected: the fixture has critical leaks)"
           [ "$code" = 1 ] || { cat result.json; exit 1; }
           node test/appwrite/check.mjs result.json appwrite-setup.json
+      - name: The answers the adapter relies on (status codes, error types, defaults, cookies)
+        run: node test/appwrite/behaviour.mjs appwrite-setup.json
+      - name: accessprobe without appwrite.json (--table only, attributes guessed)
+        run: |
+          set +e
+          node bin/accessprobe.js --platform appwrite --url http://localhost/v1 --project-id accessprobe-test             --table main/shared_docs --table main/guestbook --table main/tasks --table main/profiles --yes --json > code-only.json
+          code=$?
+          set -e
+          [ "$code" = 1 ] || { cat code-only.json; exit 1; }
+          node test/appwrite/check-code-only.mjs code-only.json
       - if: failure()
         run: |
           cat result.json 2>/dev/null | head -c 20000 || true
