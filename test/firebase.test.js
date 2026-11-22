@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { available, startEmulators, PROJECT_ID } from './firebase/emulator.js';
 import { scan } from '../src/core/scan.js';
 import { grade, markdownReport } from '../src/core/report.js';
+import { rulesTests } from '../src/providers/firebase/rules-tests.js';
 
 const SOURCE = fileURLToPath(new URL('./firebase/', import.meta.url));
 let emu = null;
@@ -200,4 +201,39 @@ t('self-escalation: users may set the field the rules use for admin rights', () 
 t('self-escalation: a rule that protects the field is a PASS', () => {
   assert.ok(!on('staff').some((f) => f.id === 'self-escalation'), JSON.stringify(on('staff')));
   assert.ok(passedFor('staff').includes('staff: users cannot set their own isStaff'), passedFor('staff').join('\n'));
+});
+
+t('anonymous sign-in: "request.auth != null" on private data is proven with an anonymous-auth user', () => {
+  const f = result.findings.find((x) => x.id === 'anon-auth-read' && x.resource === 'journal');
+  assert.ok(f && f.severity === 'critical', JSON.stringify(on('journal').map((x) => x.id)));
+  assert.match(f.detail, /Anonymous sign-in is enabled/);
+  assert.match(f.fix.code, /sign_in_provider != 'anonymous'/);
+  assert.match(f.fix.code, /disable it in Firebase console/);
+  assert.ok(has('rtdb-anon-auth-read', 'users/$uid'));
+  assert.ok(has('storage-anon-auth-read', 'avatars/{uid}'));
+});
+
+t('anonymous sign-in: rules that exclude anonymous users pass, and nothing is reported twice', () => {
+  assert.ok(passedFor('team_wiki').includes('team_wiki: anonymous-auth users cannot read'), passedFor('team_wiki').join('\n'));
+  assert.ok(!on('team_wiki').some((x) => x.id.startsWith('anon-auth')));
+  assert.ok(result.passed.includes('Storage private/{uid}: anonymous-auth users cannot download'));
+  // the unauthenticated visitor already proved these: no anonymous-auth finding on top
+  assert.ok(!on('logs').some((x) => x.id.startsWith('anon-auth')));
+  assert.ok(!on('public_posts').some((x) => x.id.startsWith('anon-auth')));
+  assert.ok(!result.findings.some((x) => x.id.startsWith('rtdb-anon-auth') && x.resource === 'open'));
+});
+
+t('rules tests: every clear verdict becomes a test; proven leaks are marked to fail until fixed', () => {
+  const code = rulesTests(result.rulesRecipes, { version: 't', target: 'x' });
+  const tests = [...code.matchAll(/^test\((".*"), async \(\) => \{(.*)$/gm)].map((m) => ({ desc: JSON.parse(m[1]), failsNow: /FAILS until the fix/.test(m[2]) }));
+  const find = (d) => tests.find((x) => x.desc === d);
+  assert.equal(find("profiles: B cannot read A's documents")?.failsNow, true);
+  assert.equal(find("journal: anonymous-auth users cannot read A's documents")?.failsNow, true);
+  assert.equal(find("team_wiki: anonymous-auth users cannot read A's documents")?.failsNow, false);
+  assert.equal(find("notes: B cannot read A's documents")?.failsNow, false);
+  assert.equal(find('members: users cannot set their own role')?.failsNow, true);
+  assert.equal(find("Storage private/{uid}: B cannot download A's files")?.failsNow, false);
+  assert.equal(find("Realtime Database /users/$uid: B cannot read A's data")?.failsNow, true);
+  assert.ok(!find("public_posts: B cannot read A's documents"), 'public by design: no verdict, no test');
+  assert.ok(!/\{A\}|\{marker\}/.test(code.replace(/\$\{A\}/g, '')), 'placeholders are filled');
 });

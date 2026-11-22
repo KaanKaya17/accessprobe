@@ -90,6 +90,8 @@ function merge(opts, site, results, failures, t0) {
     fixStyles: Object.fromEntries(results.map(({ provider: p }) => [p.id, p.fixStyle])),
     // pgTAP regression recipes (Supabase only), used by --pgtap; not part of the JSON output
     recipes: results.flatMap(({ provider: p, result: r }) => (p.id === 'supabase' && r.recipes) || []),
+    // Security Rules regression recipes (Firebase only), used by --rules-tests; not part of the JSON output
+    rulesRecipes: results.flatMap(({ provider: p, result: r }) => (p.id === 'firebase' && r.recipes) || []),
     stats: {
       resources: sum('resources'),
       fullyTested: sum('fullyTested'),

@@ -10,6 +10,7 @@ import { scan, plan } from '../core/scan.js';
 import { markdownReport, grade } from '../core/report.js';
 import { fixCode } from '../core/prompt.js';
 import { writePgtap } from '../providers/supabase/pgtap.js';
+import { writeRulesTests } from '../providers/firebase/rules-tests.js';
 
 const VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 const PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -49,6 +50,11 @@ const SCAN_PROPS = {
     type: 'string',
     description:
       'Supabase: also write the checks as pgTAP tests for `supabase test db` (e.g. supabase/tests/accessprobe.test.sql). Tests for proven leaks fail until fixed, then guard against regressions.',
+  },
+  rules_tests_file: {
+    type: 'string',
+    description:
+      'Firebase: also write the checks as Security Rules tests for the Emulator Suite (e.g. test/accessprobe.rules.test.mjs; node:test + @firebase/rules-unit-testing, run with firebase emulators:exec "node --test <file>"). Tests for proven leaks fail until fixed.',
   },
 };
 
@@ -146,6 +152,9 @@ async function callTool(name, args, cwd) {
     const md = markdownReport(result);
     if (args.report_file) await writeFile(resolve(dir, args.report_file), md, 'utf8');
     const pgtapNote = args.pgtap_file ? `${await writePgtap(resolve(dir, args.pgtap_file), result)}\n\n` : '';
+    const rulesNote = args.rules_tests_file
+      ? `${await writeRulesTests(resolve(dir, args.rules_tests_file), result, { source: opts.source || dir, rulesFiles: { firestore: opts.firestoreRules, database: opts.databaseRules, storage: opts.storageRules } })}\n\n`
+      : '';
     const g = grade(result.findings, result.stats);
     const code = exitCode(result);
     const summary = {
@@ -174,7 +183,7 @@ async function callTool(name, args, cwd) {
         : code === 1
           ? `Grade ${g}: ${summary.critical} proven critical problem(s). Each one below has evidence and a fix. Show the user before changing rules, and ask before deploying.`
           : `Grade ${g}: no critical findings. Anything under Notes was not tested.`;
-    return { content: [{ type: 'text', text: `${head}\n\n${pgtapNote}${md}` }], structuredContent: summary };
+    return { content: [{ type: 'text', text: `${head}\n\n${pgtapNote}${rulesNote}${md}` }], structuredContent: summary };
   }
   return null;
 }

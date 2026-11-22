@@ -116,6 +116,7 @@ The server runs in your project folder by default; pass `directory` to test anot
 | Firestore | **B reads / lists / modifies / takes over / deletes A's documents**, **B creates a document in A's name**, anonymous read and write. Owner fields, `{uid}` path ownership and validator schemas (`hasOnly`, `is string`) are read from `firestore.rules`. **Users make themselves admin**: when your rules grant rights from the caller's own document (`get(/…/users/$(request.auth.uid)).data.role == 'admin'`), A tries to set that field itself |
 | Realtime Database | anonymous read of the root, **B reads / overwrites A's node** (`users/$uid`), **anyone lists every entry** of a node (user ids, backup codes…), open nodes. Paths come from the rules, or from your code when the rules only live in the console |
 | Storage | **B downloads / lists / deletes A's files**, anonymous download |
+| Anonymous sign-in | if the project has the Anonymous provider enabled, **an anonymous-auth user** (a free ID token, no account needed) repeats every read, list and write the unauthenticated visitor was refused. `request.auth != null` is true for it, so such rules are effectively public |
 | Rules file | test-mode time limits (`request.time < timestamp.date(…)`), `{document=**}` catch-alls |
 
 `allow read: if true` is reported as *public by design*, not as a leak.
@@ -219,6 +220,15 @@ npx accessprobe --project-id demo-my-app --api-key any --source . --emulator
 Email/password sign-up must be enabled. If it isn't, accessprobe falls back to anonymous accounts, which
 still pass a rule like `request.auth != null`.
 
+**Anonymous sign-in.** When the Anonymous provider is enabled, anyone can get a Firebase ID token with one
+request (`accounts:signUp` with no email), and that token passes `request.auth != null`. accessprobe
+signs up a third, anonymous test user and repeats each attack the unauthenticated visitor was refused.
+Where it gets through, the finding (`anon-auth-read`, `anon-auth-write`, `rtdb-anon-auth-read`,
+`storage-anon-auth-read`, …) explains this, and the fix adds
+`request.auth.token.firebase.sign_in_provider != 'anonymous'` to the rule, or tells you to disable
+Anonymous sign-in in the console if the app doesn't use it. A refused anonymous sign-up is recorded as
+"Anonymous sign-in is disabled". The anonymous user is deleted at the end like the others.
+
 Without a `database.rules.json`, Realtime Database paths are taken from your code
 (`getReference("rooms").child(roomCode)` → `rooms/$roomCode`). An attacker can read the same paths
 out of your app, so this is a fair test. accessprobe only writes test entries under its own test user's
@@ -285,6 +295,31 @@ The tests act as two fixed test users the way PostgREST does (the `authenticated
 plus `request.jwt.claims`) and run in one transaction that is rolled back. Re-generate the file after
 schema changes.
 
+## Keep the checks as rules tests (Firebase)
+
+Write every Firestore, Realtime Database and Storage check from a run into a test file for the
+Emulator Suite:
+
+```bash
+npx accessprobe --source . --emulator --project-id demo-my-app --api-key any   --rules-tests test/accessprobe.rules.test.mjs
+npm i -D @firebase/rules-unit-testing
+firebase emulators:exec --only firestore,database,storage "node --test test/accessprobe.rules.test.mjs"
+```
+
+The file uses [`@firebase/rules-unit-testing`](https://www.npmjs.com/package/@firebase/rules-unit-testing)
+with `node:test`; your project installs it as a dev dependency (accessprobe itself has no dependencies).
+Each test seeds A's document, value or file with security rules disabled, checks that A can still read
+it, and then states the secure behaviour as user B, as an unauthenticated visitor or as an
+anonymous-auth user: B cannot read, list, modify, take over or delete A's data, cannot create
+documents as A, and users cannot set the fields your rules use for admin rights. Checks that passed
+are passing tests. Checks behind a leak accessprobe proved are marked
+`// FAILS until the fix from the accessprobe report is applied` and turn green once you deploy the fix.
+After that they keep the leak from coming back, in CI and without a live project.
+
+The rules are read from your project files (paths from `firebase.json` when present). Under
+`firebase emulators:exec` the emulator hosts and project id come from its environment; otherwise the
+ports in `firebase.json` (or the defaults) are used. Re-generate the file after rules changes.
+
 ## Run it on every pull request (GitHub Action)
 
 Test your rules in CI against a **local** backend started from your repository, so every policy or rules change is attacked before it ships. Production is never touched.
@@ -308,7 +343,7 @@ jobs:
           eval "$(supabase status -o env)"
           echo "SB_URL=$API_URL" >> "$GITHUB_ENV"
           echo "SB_ANON=${ANON_KEY:-$PUBLISHABLE_KEY}" >> "$GITHUB_ENV"
-      - uses: KaanKaya17/accessprobe@v0.8.0
+      - uses: KaanKaya17/accessprobe@v0.9.0
         with:
           args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source .
 ```
@@ -320,7 +355,7 @@ jobs:
         with: { distribution: temurin, java-version: '21' }
       - run: npx firebase-tools emulators:start --only auth,firestore,database,storage --project demo-ci &
       - run: npx wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099
-      - uses: KaanKaya17/accessprobe@v0.8.0
+      - uses: KaanKaya17/accessprobe@v0.9.0
         with:
           args: --project-id demo-ci --api-key fake --source . --emulator
 ```
@@ -368,6 +403,7 @@ project. It asks you to confirm ownership before every run unless you pass `--ye
 - [x] Zero-config runs (`npx accessprobe` in a project folder)
 - [x] GitHub Action: attack your rules on every pull request (local Supabase / Firebase emulators)
 - [x] Turn findings into permanent pgTAP regression tests (`--pgtap`)
+- [x] Firebase: anonymous-auth attacker, and findings as Security Rules regression tests (`--rules-tests`)
 - [x] MCP server: agents run it after every schema change (`npx accessprobe mcp`)
 - [ ] Edge Function checks (auth required? cross-user IDs?)
 - [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)

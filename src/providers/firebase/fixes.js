@@ -74,3 +74,31 @@ export function privilegeRules(matchPath, pathVar, fields) {
     '// custom claims (request.auth.token.admin) — users cannot change those at all.',
   ].join('\n');
 }
+
+// Anonymous sign-in passes "request.auth != null": keep anonymous users out of this rule, or turn
+// the provider off. ops/conds are the rule's current allow statements, e.g. ['read'], ['request.auth != null'].
+const NOT_ANON = "request.auth.token.firebase.sign_in_provider != 'anonymous'";
+export const ANON_CONSOLE = '// If the app does not use Anonymous sign-in: disable it in Firebase console → Authentication → Sign-in method → Anonymous.';
+
+export function notAnonymousRules(matchPath, op, conds, ownerCode) {
+  const p = matchPath && !matchPath.includes('=**') ? matchPath : '/<collection>/{docId}';
+  const cond = conds?.length ? conds.map((c) => (conds.length > 1 ? `(${c})` : c)).join(' || ') : 'request.auth != null';
+  return [
+    ANON_CONSOLE,
+    '// Otherwise keep anonymous users out of this rule:',
+    `match ${p} {`,
+    `  allow ${op}: if ${/\|\|/.test(cond) ? `(${cond})` : cond} && ${NOT_ANON};`,
+    `}`,
+    ...(ownerCode ? ['// Personal data should be owner-only anyway:', ownerCode] : []),
+  ].join('\n');
+}
+
+export function rtdbNotAnonymous(path, kind) {
+  return [
+    ANON_CONSOLE,
+    `// Otherwise keep anonymous users out of "/${path}" in database.rules.json:`,
+    `"${kind}": "auth != null && auth.token.firebase.sign_in_provider !== 'anonymous'"`,
+    '// (and for personal data, owner-only:)',
+    rtdbOwnerRules(path.split('/$')[0]),
+  ].join('\n');
+}
