@@ -29,15 +29,32 @@ jobs:
           [ -n "$API_URL" ] && [ -n "$key" ] || { supabase status -o env | cut -d= -f1; echo "API_URL / ANON_KEY missing"; exit 1; }
           echo "SB_URL=$API_URL" >> "$GITHUB_ENV"
           echo "SB_ANON=$key" >> "$GITHUB_ENV"
+          echo "SB_DB=$DB_URL" >> "$GITHUB_ENV"
       - name: accessprobe against real Postgres
         run: |
           set +e
-          node bin/accessprobe.js --url "$SB_URL" --anon-key "$SB_ANON" --source test/supabase-local --yes --json > result.json
+          node bin/accessprobe.js --url "$SB_URL" --anon-key "$SB_ANON" --source test/supabase-local --yes --json             --pgtap test/supabase-local/supabase/tests/accessprobe.test.sql > result.json
           code=$?
           set -e
           echo "exit code $code (1 expected: the fixture has critical leaks)"
           [ "$code" = 1 ] || { cat result.json; exit 1; }
           node test/supabase-local/check.mjs result.json
+      - name: Generated pgTAP tests fail exactly where accessprobe proved a leak
+        working-directory: test/supabase-local
+        run: |
+          T=supabase/tests/accessprobe.test.sql
+          psql "$SB_DB" -X -q -t -A -f "$T" > tap.txt 2>&1 || true
+          node check-pgtap.mjs "$T" tap.txt
+          if supabase test db; then echo "supabase test db should fail before the fix"; exit 1; fi
+      - name: After applying the fixes, every pgTAP test passes
+        working-directory: test/supabase-local
+        run: |
+          T=supabase/tests/accessprobe.test.sql
+          psql "$SB_DB" -X -q -v ON_ERROR_STOP=1 -f fix.sql
+          psql "$SB_DB" -X -q -t -A -f "$T" > tap-fixed.txt 2>&1 || true
+          node check-pgtap.mjs "$T" tap-fixed.txt --fixed
+          supabase test db
+          supabase db reset
       - name: The GitHub Action (uses ./) on the same project
         id: action
         uses: ./

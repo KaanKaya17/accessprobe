@@ -130,6 +130,7 @@ export async function scan(opts, { site, log }) {
       findings,
       passed,
       notes,
+      recipes: tables.recipes,
       stats: {
         resources: schema.tables.length,
         resourceLabel: 'tables',

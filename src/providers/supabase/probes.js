@@ -134,6 +134,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
   let readOnly = 0; // tables users can't write to at all (no INSERT grant)
   const protectedRows = []; // A's rows that B was refused: views must not show them either
   const viewRelations = []; // views and name-only relations, checked after all tables
+  const recipes = []; // what to replay as pgTAP regression tests (see pgtap.js)
 
   for (const t of schema.tables) {
     log(`  table ${t.name}`);
@@ -206,8 +207,10 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
       }
     }
 
+    let anonVerdict = null; // anonymous read of owned rows: proven leak (false) or proven refusal (true)
     if (anonCount > 0 && !anonWrite) {
       if (t.owner) {
+        anonVerdict = false;
         tf({
           id: 'anon-read-owned',
           severity: 'critical',
@@ -234,6 +237,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
     // "0 rows" and "blocked by RLS" look identical, so anon reads are only claimed safe
     // when proven: privilege error here, or A's own row invisible to anon (step 4b).
     const anonNoAccess = privilegeDenied(anon);
+    if (anonNoAccess && t.owner) anonVerdict = true;
     const anonCanInsert = findings.some((f) => f.table === t.name && f.id === 'anon-insert');
     if (!anonWrite) {
       if (anonNoAccess && anonCanInsert) passed.push(`${t.name}: anonymous visitors can't read`);
@@ -329,6 +333,11 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
       continue;
     }
     fullyTested++;
+    const recipe = recipeFor(t, mine, aVal, A);
+    if (recipe) recipes.push(recipe);
+    mine.recipe = recipe;
+    const rec = (check, ok) => recipe?.checks.push({ check, ok });
+    if (anonVerdict !== null && !publicName(t)) rec('anon-read', anonVerdict);
     await probeEscalation(client, t, mine, A, { tf, passed, skipped, filterFor, policyDenied, msg });
     // PostgREST hides rows instead of erroring: 200 [] (or an explicit 401/403/42501) is a refusal
     const refusedOrHidden = (r) => policyDenied(r) || (r.ok && Array.isArray(r.data) && r.data.length === 0);
@@ -342,6 +351,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
     const bRead = await client.select(t.name, { token: B.token, filter: filterFor(mine) });
     const bSees = bRead.ok && Array.isArray(bRead.data) && bRead.data.length > 0;
     if (bSees && t.owner) {
+      if (!publicHint) rec('read', false);
       const total = await client.select(t.name, { token: B.token, filter: `${t.owner.name}=neq.${bVal}`, limit: 1 });
       const n = total.total ?? '?';
       tf({
@@ -365,6 +375,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
         fix: { sql: noOwnerColumn(t.name) },
       });
     } else if (refusedOrHidden(bRead)) {
+      rec('read', true);
       passed.push(`${t.name}: B cannot read A's rows`);
       protectedRows.push(mine);
     }
@@ -374,6 +385,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
     if (!anonNoAccess && !(anonCount > 0)) {
       const aRead = await client.select(t.name, { filter: filterFor(mine) });
       if (inserted(aRead)) {
+        if (t.owner && !publicHint) rec('anon-read', false);
         tf({
           id: t.owner ? 'anon-read-owned' : 'anon-read-public',
           severity: t.owner && !publicHint ? 'critical' : 'warning',
@@ -384,7 +396,10 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
           evidence: `anonymous: ${aRead.evidence} → returned A's row`,
           fix: { sql: t.owner ? pol(['select']) : enableRls(t.name) },
         });
-      } else if (refusedOrHidden(aRead)) passed.push(`${t.name}: anonymous visitors cannot read A's rows`);
+      } else if (refusedOrHidden(aRead)) {
+        if (t.owner) rec('anon-read', true);
+        passed.push(`${t.name}: anonymous visitors cannot read A's rows`);
+      }
       else skipped.push(`${t.name}: anonymous read test inconclusive (${aRead.status} ${msg(aRead.data)})`);
     }
 
@@ -395,6 +410,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
       if (inserted(bUpd)) {
         if (mine.markerCol && mine.markerCol in patch) mine.marker = patch[mine.markerCol];
         Object.assign(mine.row, bUpd.data[0]);
+        rec('update', false);
         tf({
           id: 'cross-user-update',
           severity: 'critical',
@@ -403,7 +419,10 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
           evidence: `as user B: ${bUpd.evidence}`,
           fix: { sql: t.owner ? pol(['update']) : noOwnerColumn(t.name) },
         });
-      } else if (refusedOrHidden(bUpd) && (await unchanged())) passed.push(`${t.name}: B cannot modify A's rows`);
+      } else if (refusedOrHidden(bUpd) && (await unchanged())) {
+        rec('update', true);
+        passed.push(`${t.name}: B cannot modify A's rows`);
+      }
       else skipped.push(`${t.name}: modify test inconclusive (${bUpd.status} ${msg(bUpd.data)})`);
     }
 
@@ -413,6 +432,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
       const bTake = await client.update(t.name, filterFor(mine), { [t.owner.name]: bVal }, { token: B.token });
       if (inserted(bTake)) {
         takenOver = true;
+        rec('takeover', false);
         Object.assign(mine.row, bTake.data[0]);
         tf({
           id: 'cross-user-takeover',
@@ -422,7 +442,10 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
           evidence: `as user B: ${bTake.evidence.split(JSON.stringify(bVal)).join('"<user B id>"')}`,
           fix: { sql: pol(['update']) },
         });
-      } else if (refusedOrHidden(bTake) && (await unchanged())) passed.push(`${t.name}: B cannot reassign A's rows to itself`);
+      } else if (refusedOrHidden(bTake) && (await unchanged())) {
+        rec('takeover', true);
+        passed.push(`${t.name}: B cannot reassign A's rows to itself`);
+      }
       else skipped.push(`${t.name}: takeover test inconclusive (${bTake.status} ${msg(bTake.data)})`);
     }
 
@@ -435,6 +458,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
       const r = await client.insert(t.name, row, { token: B.token });
       if (inserted(r)) {
         created.push({ table: t, row: r.data[0], markerCol: mine.markerCol, marker: fakeMarker });
+        rec('forge', false);
         tf({
           id: 'impersonated-insert',
           severity: 'critical',
@@ -444,6 +468,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
           fix: { sql: pol(['insert']) },
         });
       } else if (policyDenied(r)) {
+        rec('forge', true);
         passed.push(`${t.name}: B cannot insert rows as A`);
       } else {
         skipped.push(`${t.name}: forged-insert test inconclusive (${r.status} ${msg(r.data)})`);
@@ -457,6 +482,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
       const bDel = await client.remove(t.name, filterFor(mine), { token: B.token });
       if (inserted(bDel)) {
         mine.deleted = true;
+        rec('delete', false);
         tf({
           id: 'cross-user-delete',
           severity: 'critical',
@@ -465,13 +491,27 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
           evidence: `as user B: ${bDel.evidence}`,
           fix: { sql: t.owner ? pol(['delete']) : noOwnerColumn(t.name) },
         });
-      } else if (refusedOrHidden(bDel) && (await aRow())) passed.push(`${t.name}: B cannot delete A's rows`);
+      } else if (refusedOrHidden(bDel) && (await aRow())) {
+        rec('delete', true);
+        passed.push(`${t.name}: B cannot delete A's rows`);
+      }
       else skipped.push(`${t.name}: delete test inconclusive (${bDel.status} ${msg(bDel.data)})`);
     }
   }
 
   await probeViews(client, viewRelations, protectedRows, [A, B], { findings, passed, skipped, policyDenied, msg });
-  return { findings, passed, skipped, created, fullyTested, readOnly };
+  return { findings, passed, skipped, created, fullyTested, readOnly, recipes };
+}
+
+const publicName = (t) => PUBLIC_TABLE.test(t.name);
+
+// Only rows the SQL can rebuild: owned by auth.uid() directly (or no owner), and findable by a
+// marker text column. Profile tables keyed by the user id are left out (one row per user).
+function recipeFor(t, mine, aVal, A) {
+  if (!mine.markerCol || !mine.sent) return null;
+  if (t.owner && (t.owner.pk || String(aVal) !== String(A.id))) return null;
+  if (t.owner && (t.pkCols || []).some((c) => c.name === t.owner.name)) return null;
+  return { table: t.name, owner: t.owner?.name || null, markerCol: mine.markerCol, marker: mine.marker, sent: { ...mine.sent }, checks: [], escalations: [], views: [] };
 }
 
 export async function cleanupRows(client, created, users) {

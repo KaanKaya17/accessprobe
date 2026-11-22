@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-22
+
+### Added
+- **pgTAP regression tests** (`--pgtap supabase/tests/accessprobe.test.sql`, or `pgtap_file` in the MCP tool). Supabase checks from the run are written as tests for `supabase test db`, so they keep running in CI without a live API.
+  - Each test states the secure behaviour: B cannot read, modify, take over or delete A's rows, B cannot insert rows as A, anonymous visitors cannot read them, users cannot change their own role / plan / credits, and views do not show A's private rows.
+  - Checks that passed are passing tests. Checks behind a proven leak fail until the fix from the report is applied, then guard against the leak coming back.
+  - The tests play both users the way PostgREST does (the `authenticated` / `anon` roles and `request.jwt.claims`), use two fixed test users, and run in one rolled-back transaction.
+- The real-Postgres e2e job runs the generated tests twice. Before the fixes, exactly the leak tests must fail. After applying the fixes, every test must pass.
+
 ## [0.6.0] - 2026-11-22
 
 ### Added

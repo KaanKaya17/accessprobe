@@ -88,6 +88,8 @@ function merge(opts, site, results, failures, t0) {
     passed,
     notes,
     fixStyles: Object.fromEntries(results.map(({ provider: p }) => [p.id, p.fixStyle])),
+    // pgTAP regression recipes (Supabase only), used by --pgtap; not part of the JSON output
+    recipes: results.flatMap(({ provider: p, result: r }) => (p.id === 'supabase' && r.recipes) || []),
     stats: {
       resources: sum('resources'),
       fullyTested: sum('fullyTested'),
