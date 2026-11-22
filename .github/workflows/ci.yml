@@ -13,6 +13,8 @@ jobs:
         include:
           - os: windows-latest
             node: 22
+          - os: macos-latest
+            node: 22
     runs-on: ${{ matrix.os }}
     env:
       # the Firebase Emulator Suite end-to-end test runs on Node 22 only (it takes ~1 min)
