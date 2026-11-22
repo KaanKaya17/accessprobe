@@ -62,12 +62,15 @@ export async function probeEscalation(client, t, mine, A, h) {
     if (!values.length) continue;
     let outcome = null;
     let last = null;
+    let tried = values[0];
     for (const v of values) {
+      tried = v;
       const r = await client.update(t.name, filter, { [c.name]: v }, { token: A.token });
       last = r;
       const row = r.ok && Array.isArray(r.data) ? r.data[0] : null;
       if (row && String(row[c.name]) === String(v)) {
         outcome = 'changed';
+        mine.recipe?.escalations.push({ column: c.name, value: v, before, ok: false });
         escalated.push(`${c.name}: ${JSON.stringify(before)} → ${JSON.stringify(v)}`);
         if (!evidence.length) evidence.push(`as user A on its own row: ${r.evidence}`);
         const back = await client.update(t.name, filter, { [c.name]: before }, { token: A.token });
@@ -82,7 +85,10 @@ export async function probeEscalation(client, t, mine, A, h) {
     }
     if (outcome === 'refused') {
       const now = await reread();
-      if (now && String(now[c.name]) === String(before)) passed.push(`${t.name}: users cannot change their own ${c.name}`);
+      if (now && String(now[c.name]) === String(before)) {
+        mine.recipe?.escalations.push({ column: c.name, value: tried, before, ok: true });
+        passed.push(`${t.name}: users cannot change their own ${c.name}`);
+      }
       else skipped.push(`${t.name}: ${c.name} change test inconclusive (refused, but the row could not be re-read)`);
     } else if (!outcome && last) {
       skipped.push(`${t.name}: users could not change their own ${c.name}, but not because of a policy (${last.status} ${msg(last.data)}) — a trigger or constraint may protect it; not proven`);
@@ -139,7 +145,10 @@ export async function probeViews(client, relations, protectedRows, [A, B], h) {
     ]) {
       if (proven(same)) continue;
       const b = await look(v.name, token);
+      const source = a.hits.find((m) => m.recipe)?.recipe;
+      const recView = (ok) => source?.views.push({ view: v.name, actor: who === 'user B' ? 'B' : 'anon', ok });
       if (b.hits?.length) {
+        recView(false);
         findings.push({
           table: v.name,
           id,
@@ -155,6 +164,7 @@ export async function probeViews(client, relations, protectedRows, [A, B], h) {
       } else if (b.hits && b.r.data.length >= 1000) {
         skipped.push(`${v.name}: ${who} got a full page of 1000 rows without A's, so A's row may be further down; not proven`);
       } else if (b.hits || policyDenied(b.r)) {
+        recView(true);
         passed.push(`${v.name}: ${who === 'user B' ? "B" : 'anonymous visitors'} cannot read A's private rows through it`);
       } else {
         skipped.push(`${v.name}: ${who} check inconclusive (${b.r.status} ${msg(b.r.data)})`);

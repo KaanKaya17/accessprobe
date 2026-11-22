@@ -57,6 +57,9 @@ Common
   --only <name>          Test only this table / collection (repeatable)
   --bucket <name>        Also test this storage bucket (repeatable)
   --out <file.md>        Write a Markdown report with fix SQL + AI prompts
+  --pgtap <file.sql>     Supabase: also write the checks as pgTAP tests for
+                         "supabase test db" (e.g. supabase/tests/accessprobe.test.sql).
+                         Leaks found now fail until fixed; then they guard CI.
   --json                 Print the raw result as JSON
   --yes                  Skip the "I own this app" confirmation (for CI)
   -q, --quiet            Less output
@@ -91,6 +94,7 @@ const OPTIONS = {
   only: { type: 'string', multiple: true },
   bucket: { type: 'string', multiple: true },
   out: { type: 'string' },
+  pgtap: { type: 'string' },
   json: { type: 'boolean' },
   yes: { type: 'boolean' },
   quiet: { type: 'boolean', short: 'q' },
@@ -197,11 +201,17 @@ if (!v.yes) {
 
 try {
   const result = await scan(opts, prepared);
-  if (v.json) console.log(JSON.stringify({ grade: grade(result.findings, result.stats), ...result }, null, 2));
+  const { recipes, ...shown } = result;
+  if (v.json) console.log(JSON.stringify({ grade: grade(result.findings, result.stats), ...shown }, null, 2));
   else printReport(result, { wroteFile: Boolean(v.out) });
   if (v.out) {
     await writeFile(v.out, markdownReport(result), 'utf8');
     if (!v.json) console.log(`Report written to ${v.out}`);
+  }
+  if (v.pgtap) {
+    const { writePgtap } = await import('../src/providers/supabase/pgtap.js');
+    const msg = await writePgtap(v.pgtap, result);
+    console.error(msg);
   }
   if (result.findings.some((f) => f.severity === 'critical')) process.exit(1);
   process.exit(grade(result.findings, result.stats) === 'N/A' ? 3 : 0);

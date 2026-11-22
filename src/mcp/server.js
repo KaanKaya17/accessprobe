@@ -9,6 +9,7 @@ import { writeFile } from 'node:fs/promises';
 import { scan, plan } from '../core/scan.js';
 import { markdownReport, grade } from '../core/report.js';
 import { fixCode } from '../core/prompt.js';
+import { writePgtap } from '../providers/supabase/pgtap.js';
 
 const VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 const PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -42,6 +43,11 @@ const SCAN_PROPS = {
   email_domain: { type: 'string', description: 'Domain for auto-created test users (default: example.com).' },
   cleanup_rpc: { type: 'string', description: 'Supabase RPC each test user calls at the end to delete itself (e.g. delete_my_account).' },
   report_file: { type: 'string', description: 'Also write the Markdown report to this file (relative to directory).' },
+  pgtap_file: {
+    type: 'string',
+    description:
+      'Supabase: also write the checks as pgTAP tests for `supabase test db` (e.g. supabase/tests/accessprobe.test.sql). Tests for proven leaks fail until fixed, then guard against regressions.',
+  },
 };
 
 export const TOOLS = [
@@ -135,6 +141,7 @@ async function callTool(name, args, cwd) {
     const result = await scan(opts);
     const md = markdownReport(result);
     if (args.report_file) await writeFile(resolve(dir, args.report_file), md, 'utf8');
+    const pgtapNote = args.pgtap_file ? `${await writePgtap(resolve(dir, args.pgtap_file), result)}\n\n` : '';
     const g = grade(result.findings, result.stats);
     const code = exitCode(result);
     const summary = {
@@ -163,7 +170,7 @@ async function callTool(name, args, cwd) {
         : code === 1
           ? `Grade ${g}: ${summary.critical} proven critical problem(s). Each one below has evidence and a fix. Show the user before changing rules, and ask before deploying.`
           : `Grade ${g}: no critical findings. Anything under Notes was not tested.`;
-    return { content: [{ type: 'text', text: `${head}\n\n${md}` }], structuredContent: summary };
+    return { content: [{ type: 'text', text: `${head}\n\n${pgtapNote}${md}` }], structuredContent: summary };
   }
   return null;
 }

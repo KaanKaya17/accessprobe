@@ -211,6 +211,25 @@ lists collections to superusers, so without `pb_migrations` the collection names
 **Exit codes:** `0` ok, `1` critical issue found, `2` usage error, `3` nothing could be tested.
 accessprobe never reports a clean grade for an app it couldn't test.
 
+## Keep the checks as pgTAP tests (Supabase)
+
+Write every check from a run into a test file for `supabase test db`:
+
+```bash
+npx accessprobe --source . --pgtap supabase/tests/accessprobe.test.sql
+supabase test db
+```
+
+Each test states the secure behaviour: B cannot read, modify, take over or delete A's rows, cannot
+insert rows as A, anonymous visitors cannot read them, users cannot change their own role or plan,
+and views do not show A's private rows. Checks that passed are passing tests. Checks behind a leak
+accessprobe proved are marked `FAILS until the fix` and turn green once you apply the fix from the
+report. After that they keep the leak from coming back, in CI and without a running API.
+
+The tests act as two fixed test users the way PostgREST does (the `authenticated` and `anon` roles
+plus `request.jwt.claims`) and run in one transaction that is rolled back. Re-generate the file after
+schema changes.
+
 ## Run it on every pull request (GitHub Action)
 
 Test your rules in CI against a **local** backend started from your repository, so every policy or rules change is attacked before it ships. Production is never touched.
@@ -234,7 +253,7 @@ jobs:
           eval "$(supabase status -o env)"
           echo "SB_URL=$API_URL" >> "$GITHUB_ENV"
           echo "SB_ANON=${ANON_KEY:-$PUBLISHABLE_KEY}" >> "$GITHUB_ENV"
-      - uses: KaanKaya17/accessprobe@v0.6.0
+      - uses: KaanKaya17/accessprobe@v0.7.0
         with:
           args: --url ${{ env.SB_URL }} --anon-key ${{ env.SB_ANON }} --source .
 ```
@@ -246,7 +265,7 @@ jobs:
         with: { distribution: temurin, java-version: '21' }
       - run: npx firebase-tools emulators:start --only auth,firestore,database,storage --project demo-ci &
       - run: npx wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099
-      - uses: KaanKaya17/accessprobe@v0.6.0
+      - uses: KaanKaya17/accessprobe@v0.7.0
         with:
           args: --project-id demo-ci --api-key fake --source . --emulator
 ```
@@ -293,7 +312,7 @@ project. It asks you to confirm ownership before every run unless you pass `--ye
 - [x] Claude Code skill + `AGENTS.md` for Codex / Cursor (`accessprobe setup-agent`)
 - [x] Zero-config runs (`npx accessprobe` in a project folder)
 - [x] GitHub Action: attack your rules on every pull request (local Supabase / Firebase emulators)
-- [ ] Turn findings into permanent pgTAP regression tests
+- [x] Turn findings into permanent pgTAP regression tests (`--pgtap`)
 - [x] MCP server: agents run it after every schema change (`npx accessprobe mcp`)
 - [ ] Edge Function checks (auth required? cross-user IDs?)
 - [x] Firebase: Firestore, Realtime Database, Storage (tested against the Emulator Suite)
