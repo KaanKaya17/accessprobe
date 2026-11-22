@@ -73,6 +73,7 @@ export function parseFunctions(sqlFiles = []) {
         searchPath: /\bset\s+search_path\b/i.test(attrs),
         trigger: /\breturns\s+(event_)?trigger\b/i.test(attrs),
         checksAuth: AUTH_CHECK.test(body),
+        body,
         // CREATE OR REPLACE keeps the grants of the function it replaces
         anon: prev ? prev.anon : defaultAnon,
         authenticated: prev ? prev.authenticated : defaultAuth,
@@ -91,6 +92,22 @@ export function parseFunctions(sqlFiles = []) {
       }
     }
   }
+  // a helper that reads auth.uid() counts for its callers: current_user_id(), is_member_of(org) …
+  for (let changed = true; changed; ) {
+    changed = false;
+    const checkers = [...defs.values()].filter((d) => d.checksAuth).map((d) => d.name);
+    for (const d of defs.values()) {
+      if (d.checksAuth || !checkers.length) continue;
+      const calls = (n) => new RegExp(`(^|[^\\w.]|public\\s*\\.\\s*)"?${n}"?\\s*\\(`, 'i').test(d.body);
+      const via = checkers.find(calls);
+      if (via) {
+        d.checksAuth = true;
+        d.authVia = via;
+        changed = true;
+      }
+    }
+  }
+  for (const d of defs.values()) delete d.body;
   return defs;
 }
 

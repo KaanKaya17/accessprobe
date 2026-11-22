@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-22
+
+### Fixed
+- `definer-no-auth-check` no longer flags a SECURITY DEFINER function that checks the caller through a helper (`public.current_user_id()`, `is_member_of(org)` …) defined in the migrations: a function that calls a function that reads `auth.uid()` / `auth.jwt()` counts as checking, transitively. Found on a real app before it could cause a false alarm.
+- Firebase: a project that only uses the Realtime Database no longer gets "No firestore.rules … pass --source" when `--source` was passed; the note now says Firestore is not used.
+
 ## [0.13.0] - 2026-11-22
 
 ### Added (Supabase)

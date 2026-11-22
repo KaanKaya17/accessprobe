@@ -93,7 +93,10 @@ export async function scan(opts, { site, log }) {
     src.collections = [...names];
   }
   if (!src.firestoreRules && !src.collections.length) {
-    notes.push('No firestore.rules and no collection names found — pass --source <project folder> so accessprobe knows what to test.');
+    // an app that only uses the Realtime Database (rules or getReference() paths found) needs no Firestore hint
+    const usesRtdb = Boolean(src.databaseRules) || Boolean(src.rtdbCodePaths?.length);
+    if (!usesRtdb) notes.push(`No firestore.rules and no collection names found${opts.source ? ' in --source' : ' — pass --source <project folder> so accessprobe knows what to test'}.`);
+    else notes.push('Firestore: not used by this project (no firestore.rules, no collection names), not tested.');
   }
 
   const emulator = opts.emulator ? (typeof opts.emulator === 'object' ? opts.emulator : DEFAULT_EMULATOR) : null;
