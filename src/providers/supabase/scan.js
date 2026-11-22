@@ -83,7 +83,7 @@ export async function scan(opts, { site, log }) {
   if (site) log(`→ Supabase config from ${site.url}`);
   if (!opts.url && opts.source) log(`  Supabase project: ${url}`);
 
-  const client = new SupabaseClient({ url, anonKey });
+  const client = new SupabaseClient({ url, anonKey, readOnly: opts.readOnly });
 
   // 2. two test users
   log('→ Signing in two test users (A and B)');

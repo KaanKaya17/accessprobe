@@ -75,6 +75,11 @@ export function printReport(r, { wroteFile = false } = {}) {
     out.push('');
   }
 
+  if (r.accepted?.length) {
+    out.push(color.bold('Accepted (open on purpose, listed in .accessprobeignore — not graded)'));
+    for (const f of r.accepted) out.push(color.dim(`  ~ ${tag(r, f)}${f.title} — ${f.acceptedBecause}`));
+    out.push('');
+  }
   if (r.passed.length) {
     out.push(color.green(color.bold('Passed')));
     for (const p of r.passed) out.push(color.green(`  ✔ ${p}`));
@@ -145,6 +150,14 @@ export function markdownReport(r) {
     }
   });
 
+  if (r.accepted?.length) {
+    md.push('## Accepted (open on purpose)');
+    md.push('');
+    md.push('Listed in `.accessprobeignore`, so not graded. Remove a line there to get the finding back.');
+    md.push('');
+    r.accepted.forEach((f) => md.push(`- ${tag(r, f)}${f.title} (\`${f.id}\`) — ${f.acceptedBecause}`));
+    md.push('');
+  }
   if (r.passed.length) {
     md.push('## Passed checks');
     md.push('');

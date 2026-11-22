@@ -3,6 +3,7 @@
 
 import { fetchSite, genericSecrets } from './site.js';
 import { providers, byId } from '../providers/index.js';
+import { applyAccept, acceptRecipes } from './accept.js';
 
 // Work out WHAT will be tested before anything is written: which backends, and exactly which
 // project / URL each one would touch. The CLI shows this in the "do you own it?" question.
@@ -79,19 +80,40 @@ function merge(opts, site, results, failures, t0) {
     for (const x of r.notes) if (!notes.includes(pre + x)) notes.push(pre + x);
   }
 
+  if (opts.readOnly) {
+    // one line instead of one "write test skipped … not sent (--read-only)" per table
+    const skippedWrites = [];
+    for (let i = notes.length - 1; i >= 0; i--) {
+      if (!notes[i].includes('not sent (--read-only)')) continue;
+      skippedWrites.unshift(notes[i].split(':')[0]);
+      notes.splice(i, 1);
+    }
+    if (skippedWrites.length) notes.unshift(`Write tests not run (--read-only): ${[...new Set(skippedWrites)].join(', ')}`);
+    notes.unshift('Read-only run: nothing was written, so every write check (create, change, delete, upload) was skipped. Reads were tested with the data already there; a clean result here is not full coverage.');
+  }
+  const entries = opts.accept?.entries || [];
+  const acc = applyAccept(findings, entries);
+  if (!opts.only?.length) {
+    for (const e of acc.unused) {
+      notes.push(`${opts.accept.file} line ${e.line} (${e.resource}${e.id ? ` ${e.id}` : ''}) matched nothing in this run — remove it if that issue is gone`);
+    }
+  }
+
   const sum = (k) => results.reduce((n, { result }) => n + (result.stats?.[k] || 0), 0);
   return {
     target: opts.site || results[0].result.target,
     date: new Date().toISOString(),
     platforms: results.map(({ provider: p, result: r }) => ({ id: p.id, label: p.label, stats: r.stats })),
-    findings,
+    findings: acc.findings,
+    // open on purpose (listed in .accessprobeignore): shown, but not graded
+    accepted: acc.accepted,
     passed,
     notes,
     fixStyles: Object.fromEntries(results.map(({ provider: p }) => [p.id, p.fixStyle])),
     // pgTAP regression recipes (Supabase only), used by --pgtap; not part of the JSON output
-    recipes: results.flatMap(({ provider: p, result: r }) => (p.id === 'supabase' && r.recipes) || []),
+    recipes: acceptRecipes(results.flatMap(({ provider: p, result: r }) => (p.id === 'supabase' && r.recipes) || []), entries),
     // Security Rules regression recipes (Firebase only), used by --rules-tests; not part of the JSON output
-    rulesRecipes: results.flatMap(({ provider: p, result: r }) => (p.id === 'firebase' && r.recipes) || []),
+    rulesRecipes: acceptRecipes(results.flatMap(({ provider: p, result: r }) => (p.id === 'firebase' && r.recipes) || []), entries),
     stats: {
       resources: sum('resources'),
       fullyTested: sum('fullyTested'),

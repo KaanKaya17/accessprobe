@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { createServer, FIXTURE_DIR, PROJECT_ID } from './mock-appwrite.js';
 import { scan } from '../src/core/scan.js';
 import { grade, markdownReport } from '../src/core/report.js';
+import { recordRequests, assertReadOnly } from './read-only-helper.js';
 
 let server;
 let url;
@@ -194,4 +195,17 @@ test('closed sign-up: a clear error that asks for --user-a / --user-b', async ()
   } finally {
     closed.close();
   }
+});
+
+test('--read-only: only reads go out, and nothing is claimed for the skipped writes', async () => {
+  const pw = 'Existing-Passw0rd-1';
+  for (const email of ['ro-a@example.com', 'ro-b@example.com']) {
+    const res = await fetch(`${url}/account`, { method: 'POST', headers: { 'X-Appwrite-Project': PROJECT_ID, 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: 'unique()', email, password: pw }) });
+    assert.equal(res.status, 201);
+  }
+  const before = server.state.users.size;
+  const run = await recordRequests(() => scan({ url, projectId: PROJECT_ID, source: FIXTURE_DIR, userA: `ro-a@example.com:${pw}`, userB: `ro-b@example.com:${pw}`, readOnly: true, quiet: true }));
+  assertReadOnly(run);
+  assert.equal(server.state.users.size, before, 'no users created');
+  assert.ok([...server.state.users.values()].every((u) => u.status !== false || !u.email.startsWith('ro-')), 'given users are not blocked');
 });

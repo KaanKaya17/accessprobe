@@ -8,6 +8,8 @@
 //   documents  /v1/databases/{db}/collections/{coll}/documents   (Appwrite 1.5+)
 //   rows       /v1/tablesdb/{db}/tables/{table}/rows             (TablesDB, Appwrite 1.8+)
 
+import { readOnlyBlock } from '../../core/read-only.js';
+
 export const API = {
   documents: {
     base: (db, coll) => `/v1/databases/${encodeURIComponent(db)}/collections/${encodeURIComponent(coll)}/documents`,
@@ -38,7 +40,8 @@ const QUERY = {
 };
 
 export class AppwriteClient {
-  constructor({ url, projectId, timeoutMs = 15000 }) {
+  constructor({ url, projectId, timeoutMs = 15000, readOnly = false }) {
+    this.readOnly = readOnly;
     this.url = normalizeEndpoint(url);
     this.projectId = projectId;
     this.timeoutMs = timeoutMs;
@@ -47,6 +50,8 @@ export class AppwriteClient {
 
   // auth: { cookie, fallback } | { session } | { jwt } | undefined (anonymous: only the project header)
   async request(method, path, { auth, body, form } = {}) {
+    const blocked = this.readOnly && readOnlyBlock(method, path);
+    if (blocked) return { ok: false, status: 0, data: { message: blocked }, headers: new Headers(), evidence: `${method} ${path} → ${blocked}` };
     const headers = { 'X-Appwrite-Project': this.projectId };
     if (auth?.jwt) headers['X-Appwrite-JWT'] = auth.jwt;
     else if (auth?.session) headers['X-Appwrite-Session'] = auth.session;

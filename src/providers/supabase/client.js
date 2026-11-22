@@ -1,7 +1,10 @@
 // Minimal Supabase HTTP client (PostgREST, GoTrue, Storage). Zero dependencies.
 
+import { readOnlyBlock } from '../../core/read-only.js';
+
 export class SupabaseClient {
-  constructor({ url, anonKey, timeoutMs = 15000 }) {
+  constructor({ url, anonKey, timeoutMs = 15000, readOnly = false }) {
+    this.readOnly = readOnly;
     this.url = url.replace(/\/+$/, '');
     this.anonKey = anonKey;
     this.timeoutMs = timeoutMs;
@@ -16,6 +19,8 @@ export class SupabaseClient {
   }
 
   async request(method, path, { token, body, headers = {}, raw = false } = {}) {
+    const blocked = this.readOnly && readOnlyBlock(method, path);
+    if (blocked) return { ok: false, status: 0, data: { message: blocked }, headers: new Headers(), evidence: `${method} ${path} → ${blocked}` };
     const h = this.headers(token, headers);
     let payload;
     if (body !== undefined) {

@@ -99,7 +99,7 @@ export async function scan(opts, { site, log }) {
     );
   }
   const { targets, usersTarget, auth, refs } = buildTargets(src, opts, notes);
-  const client = new PocketBaseClient({ url });
+  const client = new PocketBaseClient({ url, readOnly: opts.readOnly });
 
   log(`→ Signing in two test users (A and B) through the "${auth.name}" collection on ${url}`);
   const users = await setupUsers(client, auth.name, { userA: opts.userA, userB: opts.userB, emailDomain: opts.emailDomain, log });

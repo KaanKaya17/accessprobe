@@ -39,6 +39,21 @@ jobs:
           echo "exit code $code (1 expected: the fixture has critical leaks)"
           [ "$code" = 1 ] || { cat result.json; exit 1; }
           node test/supabase-local/check.mjs result.json
+      - name: --read-only changes nothing in the database
+        run: |
+          for u in ro-a ro-b; do
+            curl -sf -X POST "$SB_URL/auth/v1/signup" -H "apikey: $SB_ANON" -H 'Content-Type: application/json'               -d "{\"email\":\"$u@example.com\",\"password\":\"Ro-Passw0rd-123\"}" > /dev/null
+          done
+          psql "$SB_DB" -X -q -t -A -f test/supabase-local/snapshot.sql > before.txt
+          set +e
+          node bin/accessprobe.js --url "$SB_URL" --anon-key "$SB_ANON" --source test/supabase-local --yes --json --read-only             --user-a ro-a@example.com:Ro-Passw0rd-123 --user-b ro-b@example.com:Ro-Passw0rd-123 > ro.json
+          code=$?
+          set -e
+          psql "$SB_DB" -X -q -t -A -f test/supabase-local/snapshot.sql > after.txt
+          echo "exit code $code"
+          [ "$code" = 0 ] || [ "$code" = 1 ] || { cat ro.json; exit 1; }
+          diff before.txt after.txt || { echo "--read-only changed the database"; exit 1; }
+          node -e 'const r=require("./ro.json"); if(!r.notes[0].startsWith("Read-only run")) throw new Error("no read-only note"); if(r.passed.some(p=>/cannot (insert|update|change|delete|create|upload|forge)/i.test(p))) throw new Error("write check claimed as passed: "+r.passed.join("; ")); console.log(r.findings.length+" findings from existing data, "+r.passed.length+" passed")'
       - name: Generated pgTAP tests fail exactly where accessprobe proved a leak
         working-directory: test/supabase-local
         run: |
