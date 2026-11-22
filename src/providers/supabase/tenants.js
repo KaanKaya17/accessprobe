@@ -401,7 +401,8 @@ export async function probeTenants(client, schema, [A, B], { log, findings, pass
     return ten;
   } finally {
     // newest first: tenant rows, B's membership, then the org, then A's membership
-    const left = [];
+    let left = [];
+    let orgGone = false;
     const orgRow = mine.find((c) => c.table === T);
     const ordered = [...mine.filter((c) => c.table !== T && c.table !== M), ...mine.filter((c) => c.table === M && c.row[userCol] !== ownerValue(M, A)), ...(orgRow ? [orgRow] : []), ...mine.filter((c) => c.table === M && c.row[userCol] === ownerValue(M, A))];
     for (const c of ordered) {
@@ -416,9 +417,13 @@ export async function probeTenants(client, schema, [A, B], { log, findings, pass
           break;
         }
       }
+      if (gone && c === orgRow) orgGone = true;
       // the org delete may have cascaded to the memberships: only report what is really still there
       if (!gone && rows(await client.select(c.table.name, { token: A.token, filter }))?.length) left.push(c);
     }
+    // rows that can't be deleted on their own (ratings with no DELETE policy) went with the
+    // organization: a NOT NULL foreign key to it either cascades or blocks the org delete
+    if (orgGone) left = left.filter((c) => c.table.columns.find((x) => x.name === col)?.fk?.table !== T.name);
     if (left.length) skipped.push(`Could not delete some organization test rows, remove them manually: ${left.map((c) => `${c.table.name} ${c.filter || filterFor(c)}`).join('; ')}`);
   }
 }
