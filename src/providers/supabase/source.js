@@ -57,7 +57,7 @@ export function sourceToDefinitions(src) {
       let description = '';
       if (t.pkCols.has(col) || c.pk) description += '<pk/>';
       if (c.fk) description += `<fk table='${c.fk.table}' column='${c.fk.column}'/>`;
-      properties[col] = { format: c.format, ...(description && { description }), ...(c.hasDefault && { default: 'db' }) };
+      properties[col] = { format: c.format, ...(description && { description }), ...(c.hasDefault && { default: 'db' }), ...(c.enum && { enum: c.enum }) };
       if (c.notNull && !c.hasDefault) required.push(col);
     }
     definitions[name] = { properties, required, 'x-name-only': Boolean(t.nameOnly), 'x-view': Boolean(t.isView) };
@@ -124,7 +124,11 @@ function parseColumnOrConstraint(def, t) {
   const [, name, rest] = cm;
   const r = rest.toLowerCase();
   const ref = rest.match(/references\s+(?:"?(\w+)"?\.)?"?(\w+)"?\s*(?:\(\s*"?(\w+)"?\s*\))?/i);
+  // check (role in ('owner', 'member')): the allowed values, like an enum
+  const chk = rest.match(new RegExp(`check\\s*\\(\\s*"?${name}"?\\s+in\\s*\\(([^)]*)\\)`, 'i'));
+  const allowed = chk ? [...chk[1].matchAll(/'((?:[^']|'')*)'/g)].map((m) => m[1].replace(/''/g, "'")) : null;
   t.columns.set(name, {
+    ...(allowed?.length && { enum: allowed }),
     format: normalizeType(r),
     notNull: /\bnot\s+null\b/.test(r) || /\bprimary\s+key\b/.test(r),
     hasDefault: /\bdefault\b|\bgenerated\b|^(big|small)?serial\b/.test(r),

@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-22
+
+Found by preparing a run on a real Supabase fitness app (its migrations), running 0.13.0 on a real Firebase game, and on a new multi-tenant app built from scratch (a five-a-side squad app: groups, matches, line-ups, anonymous ratings).
+
+### Added
+- **Organizations: nested tables.** A table scoped by the organization that points at another scoped table (`match_players.match_id → matches`) is filled with the row A just created there, and a second user column (`ratings.ratee_id`) gets user B. Rows without a text column are recognized by their primary key (the change test needs a text column; read and delete are still tested).
+- **Organizations: roles from the migrations.** Allowed values of `CHECK (role in (…))` become the column's values (like an enum), so roles named `organizer` / `player` (or `kaptan` / `oyuncu`) are understood. A member insert can leave the role to its default.
+- **Sensitive columns** are also checked when B reads other users' existing rows (a profile table filled by a trigger, where accessprobe can't insert its own row).
+
+### Fixed
+- `definer-no-auth-check` no longer flags a SECURITY DEFINER function that checks the caller through a helper (`public.current_user_id()`, `is_member_of(org)` …) defined in the migrations: a function that calls a function that reads `auth.uid()` / `auth.jwt()` counts as checking, transitively. Found on a real app before it could cause a false alarm.
+- Firebase: a project that only uses the Realtime Database no longer gets "No firestore.rules … pass --source" when `--source` was passed; the note now says Firestore is not used.
+- Organizations: rows that can't be deleted on their own (no DELETE policy, e.g. ratings) but went with the organization through its foreign key are no longer reported as left behind.
+- e2e: Supabase CLI pinned to 3.2.0; resolving "latest" hit the GitHub API rate limit.
+
 ## [0.13.0] - 2026-11-22
 
 ### Added (Supabase)

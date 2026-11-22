@@ -69,3 +69,9 @@ test('organizations: test data is gone and the per-user noise for org tables is 
   assert.ok(result.notes.some((n) => n.startsWith('Organizations: tested orgs with members in org_members.org_id')));
   assert.ok(!result.notes.some((n) => /^(projects|invoices|org_files): .*cannot fill/.test(n)));
 });
+
+test('organizations: a nested table without a text column is filled from A\'s parent row and tested by primary key', () => {
+  assert.ok(result.passed.includes('invoice_lines: users outside the organization cannot read its rows'), result.notes.filter((n) => n.includes('invoice_lines')).join('\n'));
+  assert.ok(result.passed.includes('invoice_lines: users outside the organization cannot delete its rows'));
+  assert.ok(!result.findings.some((f) => f.table === 'invoice_lines'));
+});

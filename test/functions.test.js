@@ -109,3 +109,20 @@ test('graphql: anon introspection that lists tables is a warning with names only
   assert.match(g.fix.sql, /drop extension if exists pg_graphql/);
   assert.match(g.evidence, /^anonymous: POST \/graphql\/v1/);
 });
+
+test('parseFunctions: calling a helper that checks auth.uid() counts as checking the caller', () => {
+  const d = parseFunctions([
+    {
+      file: 'x.sql',
+      text: `create function public.current_user_id() returns bigint language sql stable security definer set search_path = '' as $$ select user_id from public.users where auth_id = auth.uid() $$;
+create function public.consume_quota(n int default 60) returns boolean language plpgsql security definer set search_path = '' as $$ declare uid bigint := public.current_user_id(); begin return uid is not null; end $$;
+create function public.wrapper() returns boolean language sql security definer set search_path = '' as $$ select public.consume_quota() $$;
+create function public.my_current_user_id_copy() returns int language sql security definer set search_path = '' as $$ select 1 $$;`,
+    },
+  ]);
+  assert.equal(d.get('consume_quota').checksAuth, true);
+  assert.equal(d.get('consume_quota').authVia, 'current_user_id');
+  assert.equal(d.get('wrapper').checksAuth, true, 'transitive');
+  assert.equal(d.get('my_current_user_id_copy').checksAuth, false, 'a name containing the helper is not a call');
+  assert.ok(!definerFindings(d).some((f) => f.id === 'definer-no-auth-check' && f.resource !== 'my_current_user_id_copy'));
+});

@@ -328,6 +328,11 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
               evidence: `as user B: ${r.evidence} — ${n} foreign rows visible`,
               fix: { sql: pol() },
             });
+            const row = Array.isArray(r.data) ? r.data[0] : null;
+            if (!sensitiveShown && row && typeof row === 'object') {
+              const sf = sensitiveFinding(t.name, Object.keys(row), 'B', `as user B: ${r.evidence}`);
+              if (sf) tf(sf);
+            }
           } else if (n === 0) {
             skipped.push(`${t.name}: B sees no other users' rows — not proven (no test row; the table may simply be empty)`);
           }
