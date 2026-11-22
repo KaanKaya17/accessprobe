@@ -150,21 +150,35 @@ export async function probeTenants(client, schema, [A, B], { log, findings, pass
     const bMemberVal = ownerValue(M, B);
     const memberFilter = (who) => `${col}=eq.${encodeURIComponent(orgId)}&${userCol}=eq.${encodeURIComponent(who)}`;
     const memberRow = (who) => ({ table: M, row: { [col]: orgId, [userCol]: who }, markerCol: null, marker: undefined, filter: memberFilter(who) });
+    // insert a membership. RETURNING has to pass the SELECT policy, and a policy like
+    // is_member_of(org_id) can't see the new row inside the same statement: then insert without
+    // RETURNING and look the row up as A (an owner sees the member list)
+    const addMember = async (row, token, who) => {
+      const r = await client.insert(M.name, row, { token });
+      if (rows(r)?.length) return { ok: true, r };
+      if (!denied(r)) return { ok: false, r };
+      const m = await client.insert(M.name, row, { token, minimal: true });
+      if (!m.ok) return { ok: false, r: m.status ? m : r };
+      const seen = rows(await client.select(M.name, { token: A.token, filter: memberFilter(who) }))?.length > 0;
+      return { ok: seen, r: m };
+    };
 
     const aIsMember = rows(await client.select(M.name, { token: A.token, filter: memberFilter(aMemberVal) }))?.length > 0;
     if (!aIsMember) {
       let ok = false;
+      let last = null;
       for (const role of roleCol ? roles.admin.length ? roles.admin : [null] : [null]) {
         const b = buildRow(M, { ownerId: aMemberVal, marker: `accessprobe-${rand()}`, fixed: { [col]: orgId, ...(roleCol && role && { [roleCol]: role }) } });
         if (!b) break;
-        const r = await client.insert(M.name, b.row, { token: A.token });
-        if (rows(r)?.length) {
+        const res = await addMember(b.row, A.token, aMemberVal);
+        last = res.r;
+        if (res.ok) {
           ok = true;
           break;
         }
       }
       if (!ok) {
-        skipped.push(`Organizations (${label}): A created an organization but could not make itself a member of it, so team rules were not tested (maybe a trigger or function does that).`);
+        skipped.push(`Organizations (${label}): A created an organization but could not make itself a member of it (${last ? `${last.status} ${msg(last.data)}` : 'no insertable row'}), so team rules were not tested (maybe a trigger or function does that).`);
         return ten;
       }
     }
@@ -252,8 +266,8 @@ export async function probeTenants(client, schema, [A, B], { log, findings, pass
     for (const role of roleCol ? [...roles.admin, ...roles.member] : [null]) {
       const b = buildRow(M, { ownerId: bMemberVal, marker: `accessprobe-${rand()}`, fixed: { [col]: orgId, ...(roleCol && role && { [roleCol]: role }) } });
       if (!b) break;
-      const r = await client.insert(M.name, b.row, { token: B.token });
-      if (rows(r)?.length) {
+      const { ok, r } = await addMember(b.row, B.token, bMemberVal);
+      if (ok) {
         joined = { role, r };
         break;
       }
@@ -282,8 +296,7 @@ export async function probeTenants(client, schema, [A, B], { log, findings, pass
     for (const role of roleCol ? (roles.member.length ? roles.member : [null]) : [null]) {
       const b = buildRow(M, { ownerId: bMemberVal, marker: `accessprobe-${rand()}`, fixed: { [col]: orgId, ...(roleCol && role && { [roleCol]: role }) } });
       if (!b) break;
-      const r = await client.insert(M.name, b.row, { token: A.token });
-      if (rows(r)?.length) {
+      if ((await addMember(b.row, A.token, bMemberVal)).ok) {
         added = { role };
         break;
       }

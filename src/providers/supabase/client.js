@@ -86,11 +86,13 @@ export class SupabaseClient {
     }).then((r) => ({ ...r, total: parseTotal(r.headers.get('content-range')) }));
   }
 
-  insert(table, row, { token } = {}) {
+  // minimal: don't ask for the row back. RETURNING must pass the SELECT policy, which can fail for a
+  // row that only becomes visible once it exists (e.g. a membership checked by is_member_of()).
+  insert(table, row, { token, minimal = false } = {}) {
     return this.request('POST', `/rest/v1/${encodeURIComponent(table)}`, {
       token,
       body: row,
-      headers: { Prefer: 'return=representation' },
+      headers: { Prefer: minimal ? 'return=minimal' : 'return=representation' },
     });
   }
 

@@ -141,6 +141,7 @@ function makeState() {
         rows: [],
       },
       org_members: {
+        returningSnapshot: true,
         columns: { org_id: ['bigint', { pk: true, required: true, fk: 'orgs' }], user_id: ['uuid', { pk: true, required: true }], role: ['text'] },
         rls: {
           select: (c, r) => member(c, r.org_id),
@@ -420,6 +421,10 @@ export function createServer({ autoconfirm = true } = {}) {
         if (pkOf.length && t.rows.some((r) => pkOf.every((c) => String(r[c]) === String(row[c]))))
           return send(409, { code: '23505', message: 'duplicate key value violates unique constraint' });
         if (!allow(t, 'insert', ctx, row))
+          return send(403, { code: '42501', message: `new row violates row-level security policy for table "${tm[1]}"` });
+        // like Postgres: RETURNING must pass the SELECT policy, and a STABLE helper such as
+        // is_member_of() sees the table as it was before this statement
+        if (ret && t.returningSnapshot && !allow(t, 'select', ctx, row))
           return send(403, { code: '42501', message: `new row violates row-level security policy for table "${tm[1]}"` });
         t.rows.push(row);
         return send(201, ret ? [row] : undefined);
