@@ -9,6 +9,8 @@ import { extract } from './discover.js';
 import { parseSchema } from './schema.js';
 import { scanSource, sourceToDefinitions } from './source.js';
 import { setupUsers, resolveIdentities, probeTables, probeStorage, rpcReview, cleanupRows, msg } from './probes.js';
+import { parseFunctions, probeFunctions, definerFindings } from './functions.js';
+import { probeGraphql } from './graphql.js';
 
 const CLEANUP_RPC_HINT = /^(delete_(my_)?(own_)?(account|user|profile)|delete_me)$/i;
 
@@ -120,7 +122,15 @@ export async function scan(opts, { site, log }) {
     passed.push(...storage.passed);
     if (!storage.count) notes.push('No storage buckets visible to the test users (pass --bucket <name> to test one anyway).');
 
-    notes.push(...tables.skipped, ...storage.skipped);
+    log('→ Testing database functions');
+    const fnSkipped = [];
+    const rpcs = opts.only?.length ? schema.rpcs.filter((r) => opts.only.includes(r)) : schema.rpcs;
+    const proven = await probeFunctions(client, rpcs, tables.protectedRows, users, { findings, passed, skipped: fnSkipped, defs: schema.functions });
+    findings.push(...definerFindings(schema.functions, { exposed: new Set(schema.rpcs), proven }));
+
+    await probeGraphql(client, { findings, passed, skipped: fnSkipped, only: opts.only });
+
+    notes.push(...tables.skipped, ...storage.skipped, ...fnSkipped);
     findings.push(...rpcReview(schema));
 
     const hint = schema.rpcs.find((r) => CLEANUP_RPC_HINT.test(r));
@@ -162,12 +172,14 @@ export async function scan(opts, { site, log }) {
 
 async function loadSchema(client, token, notes, sourceDir, log, schemaFiles = []) {
   const merged = { tables: new Map(), rpcs: new Set() };
+  let functions = new Map();
   let anyOk = false;
   const fromSql = new Set(); // tables with columns from migrations / --schema files
   const live = new Set(); // tables the live API reports
   for (const f of schemaFiles) if (!existsSync(f)) throw new Error(`--schema file not found: ${f}`);
   if (sourceDir || schemaFiles.length) {
     const src = await scanSource(sourceDir, schemaFiles);
+    functions = parseFunctions(src.sql);
     for (const [name, t] of src.tables) if (!t.nameOnly) fromSql.add(name);
     const s = parseSchema(sourceToDefinitions(src));
     for (const t of s.tables) merged.tables.set(t.name, t);
@@ -206,7 +218,7 @@ async function loadSchema(client, token, notes, sourceDir, log, schemaFiles = []
     if (untracked.length)
       notes.push(`Live tables that are not in your migrations: ${untracked.join(', ')} (created in the dashboard?). They were tested from the live schema; \`supabase db pull\` brings them into migrations.`);
   }
-  return { tables: [...merged.tables.values()], rpcs: [...merged.rpcs] };
+  return { tables: [...merged.tables.values()], rpcs: [...merged.rpcs], functions };
 }
 
 async function cleanupUsers(client, users, rpc, notes, reuseKey) {

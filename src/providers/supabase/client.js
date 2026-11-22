@@ -67,6 +67,12 @@ export class SupabaseClient {
     };
   }
 
+  // ---------- pg_graphql: queries only (never mutations) ----------
+  graphql(query, { token } = {}) {
+    if (/^\s*mutation\b/i.test(query)) throw new Error('accessprobe sends GraphQL queries only');
+    return this.request('POST', '/graphql/v1', { token, body: { query } });
+  }
+
   // ---------- PostgREST ----------
   openapi({ token } = {}) {
     return this.request('GET', '/rest/v1/', { token, headers: { Accept: 'application/openapi+json' } });

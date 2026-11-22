@@ -39,6 +39,8 @@ jobs:
           echo "exit code $code (1 expected: the fixture has critical leaks)"
           [ "$code" = 1 ] || { cat result.json; exit 1; }
           node test/supabase-local/check.mjs result.json
+          # wipe_canary() deletes rows: accessprobe must never have run it
+          test "$(psql "$SB_DB" -X -q -t -A -c 'select count(*) from public.canary')" = 1 || { echo "canary row is gone: a data-changing function was executed"; exit 1; }
       - name: SARIF output is valid SARIF 2.1.0 and points into the migrations
         run: |
           curl -sfL https://json.schemastore.org/sarif-2.1.0.json -o sarif-schema.json

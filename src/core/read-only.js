@@ -9,6 +9,7 @@
 const READ_POSTS = [
   /^\/auth\/v1\/token\?grant_type=password$/, // Supabase sign-in
   /^\/storage\/v1\/object\/list\//, // Supabase storage listing
+  /^\/graphql\/v1$/, // Supabase GraphQL: the client only sends queries (SupabaseClient.graphql refuses mutations)
   /accounts:signInWithPassword\?/, // Firebase sign-in
   /:runQuery(\?|$)/, // Firestore query
   /:runAggregationQuery(\?|$)/, // Firestore count

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { buildRow } from './schema.js';
 import { ownerPolicies, enableRls, noOwnerColumn, storagePolicies, viewInvoker } from './fixes.js';
 import { probeEscalation, probeViews } from './privilege.js';
+import { sensitiveFinding } from './columns.js';
 
 const rand = () => Math.random().toString(36).slice(2, 8);
 
@@ -176,6 +177,15 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
       continue;
     }
     const anonCount = anon.ok ? (anon.total ?? (Array.isArray(anon.data) ? anon.data.length : 0)) : 0;
+    // a readable row hands out every column: personal data / secrets in rows anyone can read
+    let sensitiveShown = false;
+    if (anon.ok && Array.isArray(anon.data) && anon.data[0] && typeof anon.data[0] === 'object') {
+      const sf = sensitiveFinding(t.name, Object.keys(anon.data[0]), 'anon', `anonymous: ${anon.evidence}`);
+      if (sf) {
+        tf(sf);
+        sensitiveShown = true;
+      }
+    }
 
     // 2) anonymous write. Insert alone can be intended (guestbook, waitlist);
     //    insert + delete by a stranger means RLS is effectively off.
@@ -360,6 +370,10 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
     // 4) B reads A's row
     const bRead = await client.select(t.name, { token: B.token, filter: filterFor(mine) });
     const bSees = bRead.ok && Array.isArray(bRead.data) && bRead.data.length > 0;
+    if (bSees && !sensitiveShown && bRead.data[0] && typeof bRead.data[0] === 'object') {
+      const sf = sensitiveFinding(t.name, Object.keys(bRead.data[0]), 'B', `as user B: ${bRead.evidence}`);
+      if (sf) tf(sf);
+    }
     if (bSees && t.owner) {
       if (!publicHint) rec('read', false);
       const total = await client.select(t.name, { token: B.token, filter: `${t.owner.name}=neq.${bVal}`, limit: 1 });
@@ -510,7 +524,7 @@ export async function probeTables(client, schema, [A, B], { log, created = [] })
   }
 
   await probeViews(client, viewRelations, protectedRows, [A, B], { findings, passed, skipped, policyDenied, msg });
-  return { findings, passed, skipped, created, fullyTested, readOnly, recipes };
+  return { findings, passed, skipped, created, fullyTested, readOnly, recipes, protectedRows };
 }
 
 const publicName = (t) => PUBLIC_TABLE.test(t.name);

@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-22
+
+### Added (Supabase)
+- **Sensitive columns.** When anonymous visitors or user B can read someone else's row, its columns are checked by name for personal data (`email`, `phone`, addresses, date of birth, national ids, IBAN / card, IP, `stripe_customer_id`, location) and secrets (`password_hash`, `api_key`, `*_token`, `*_secret`, private keys, recovery codes). Findings `sensitive-columns-anon` / `sensitive-columns`: critical for secrets, a warning for personal data. They have their own ids, so a table accepted as public in `.accessprobeignore` (`profiles cross-user-read`) still reports the email in it. The fix is a column-level grant (or a private side table). Values are never shown.
+- **Functions, proven.** Every RPC the API exposes is called with GET and no arguments as A (control), B and an anonymous visitor. PostgREST runs GET in a read-only transaction, so nothing can be written, and a function that needs arguments is not called. If B or the visitor gets back one of A's private test rows (one B was refused through the table), that is `rpc-cross-user-read` / `rpc-anon-read` (critical). A function that applies RLS is a passed check. Runs under `--read-only` too.
+- **`SECURITY DEFINER` functions, from the migrations.** A definer function that never reads `auth.uid()` / `auth.jwt()` (or the request JWT) and that `anon` or `authenticated` may execute is `definer-no-auth-check` (warning; accessprobe never POSTs to it). Grants are followed in migration order: `REVOKE … FROM anon`, `ALTER DEFAULT PRIVILEGES`, `CREATE OR REPLACE` keeping the old grants. `REVOKE … FROM public` alone is called out: Supabase grants anon and authenticated directly. Trigger functions are skipped. Definer functions without `set search_path` are one `definer-search-path` info finding.
+- **GraphQL.** An introspection query to `/graphql/v1` as an anonymous visitor; tables it lists are `graphql-anon-schema` (warning, like Supabase's `pg_graphql_anon_table_exposed` advisor). Only a schema query is sent; the client refuses mutations, and `--read-only` allows this one POST.
+- e2e (real Postgres): the fixture has a leaking definer function, an invoker function and a data-changing definer function guarding a canary row. CI checks the leak is proven, the invoker passes, the static warning is there, and the canary row survives.
+
 ## [0.11.0] - 2026-11-22
 
 ### Added

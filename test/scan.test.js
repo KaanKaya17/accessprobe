@@ -61,7 +61,19 @@ test('products: public catalog is only a warning', () => {
 
 test('api_logs: RLS disabled → anon create+delete critical, user tests not repeated', () => {
   assert.ok(has('anon-write', 'api_logs'));
-  assert.equal(result.findings.filter((f) => f.table === 'api_logs').length, 1);
+  assert.equal(result.findings.filter((f) => f.table === 'api_logs' && !f.id.startsWith('sensitive-')).length, 1);
+});
+
+test('sensitive columns: readable rows that carry email / ip are reported by column name, never by value', () => {
+  const prof = result.findings.find((f) => f.id === 'sensitive-columns' && f.table === 'profiles');
+  assert.ok(prof, "B reads other users' profiles, which include email");
+  assert.equal(prof.severity, 'warning');
+  assert.match(prof.title, /email/);
+  assert.match(prof.fix.sql, /grant select \(/);
+  const logs = result.findings.find((f) => f.id === 'sensitive-columns-anon' && f.table === 'api_logs');
+  assert.ok(logs && logs.title.split(': ').pop().split(', ').includes('ip'));
+  const text = JSON.stringify(result.findings);
+  assert.ok(!text.includes('real-customer.com'), 'no real values in the report');
 });
 
 test('guestbook: intended anon insert is a warning and user tests still run', () => {

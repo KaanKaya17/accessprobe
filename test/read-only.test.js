@@ -32,7 +32,7 @@ after(() => server.close());
 
 test('read-only: only reads and sign-ins reach the server', () => {
   assert.ok(requests.length > 5);
-  const writes = requests.filter((r) => !/^GET /.test(r) && !/^POST \/auth\/v1\/token\?grant_type=password$/.test(r) && !/^POST \/storage\/v1\/object\/list\//.test(r));
+  const writes = requests.filter((r) => !/^GET /.test(r) && !/^POST \/auth\/v1\/token\?grant_type=password$/.test(r) && !/^POST \/storage\/v1\/object\/list\//.test(r) && r !== 'POST /graphql/v1');
   assert.deepEqual(writes, []);
 });
 
