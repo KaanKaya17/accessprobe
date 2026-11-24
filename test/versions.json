@@ -1,7 +1,7 @@
 {
   "//": "Backend versions the tests run against. The weekly Upstream workflow (test/upstream/bump.mjs) updates this file.",
-  "supabase-cli": "3.2.0",
-  "firebase-tools": "15.35.0",
+  "supabase-cli": "3.3.0",
+  "firebase-tools": "15.37.0",
   "appwrite": "2.7.4",
   "pocketbase": {
     "version": "0.40.6",
