@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch: # the weekly Upstream workflow runs this on its upstream/bump branch
 jobs:
   test:
     strategy:
@@ -33,12 +34,12 @@ jobs:
         if: matrix.node == 22
         with:
           path: ~/.cache/firebase/emulators
-          key: firebase-emulators-${{ runner.os }}-15.35.0
-      # the PocketBase end-to-end test downloads a pinned release binary from GitHub
+          key: firebase-emulators-${{ runner.os }}-${{ hashFiles('test/versions.json') }}
+      # the PocketBase end-to-end test downloads the release binary pinned in test/versions.json
       - uses: actions/cache@v6
         with:
           path: ~/.cache/accessprobe
-          key: pocketbase-${{ runner.os }}-${{ runner.arch }}-0.40.6
+          key: pocketbase-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('test/versions.json') }}
       - run: npm test
 
   # install the packed tarball like `npx accessprobe` would, then use the installed binary

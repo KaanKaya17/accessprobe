@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch: # the weekly Upstream workflow runs this on its upstream/bump branch
 permissions:
   contents: read
 jobs:
@@ -16,9 +17,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+      - name: Pinned backend versions (test/versions.json)
+        run: node test/versions.mjs | tee -a "$GITHUB_ENV"
       - uses: supabase/setup-cli@v1
         with:
-          version: 3.2.0 # pinned: resolving "latest" hits the GitHub API rate limit
+          version: ${{ env.SUPABASE_CLI_VERSION }} # pinned: resolving "latest" hits the GitHub API rate limit
       - name: Start local Supabase with the fixture migrations
         working-directory: test/supabase-local
         run: |
@@ -102,13 +105,15 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+      - name: Pinned backend versions (test/versions.json)
+        run: node test/versions.mjs | tee -a "$GITHUB_ENV"
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
       - name: Start the Firebase emulators
         working-directory: test/firebase
-        run: npx --yes firebase-tools@15.35.0 emulators:start --only auth,firestore,database,storage --project demo-ci > emulators.log 2>&1 &
+        run: npx --yes firebase-tools@$FIREBASE_TOOLS_VERSION emulators:start --only auth,firestore,database,storage --project demo-ci > emulators.log 2>&1 &
       - name: Wait for the emulators
         run: npx --yes wait-on@8.0.3 --timeout 180000 tcp:127.0.0.1:8080 tcp:127.0.0.1:9099 tcp:127.0.0.1:9000 tcp:127.0.0.1:9199
       - name: The GitHub Action (uses ./) against the emulators
@@ -137,6 +142,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+      - name: Pinned backend versions (test/versions.json)
+        run: node test/versions.mjs | tee -a "$GITHUB_ENV"
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -148,7 +155,7 @@ jobs:
           echo "RT=$RT" >> "$GITHUB_ENV"
           export RT
           mkdir -p "$RT"
-          npx --yes firebase-tools@15.35.0 emulators:exec --only auth,firestore,database,storage --project demo-ci \
+          npx --yes firebase-tools@$FIREBASE_TOOLS_VERSION emulators:exec --only auth,firestore,database,storage --project demo-ci \
             'node "$GITHUB_WORKSPACE/bin/accessprobe.js" --project-id demo-ci --api-key fake --source . --emulator --yes --quiet --rules-tests "$RT/accessprobe.rules.test.mjs"; echo $? > "$RT/code"'
           echo "accessprobe exit code $(cat "$RT/code") (1 expected: the fixture has critical leaks)"
           test "$(cat "$RT/code")" = 1
@@ -161,7 +168,7 @@ jobs:
       - name: Generated rules tests fail exactly where accessprobe proved a leak
         working-directory: test/firebase
         run: |
-          npx --yes firebase-tools@15.35.0 emulators:exec --only firestore,database,storage --project demo-ci \
+          npx --yes firebase-tools@$FIREBASE_TOOLS_VERSION emulators:exec --only firestore,database,storage --project demo-ci \
             'node --test --test-reporter=tap "$RT/accessprobe.rules.test.mjs" > "$RT/tap.txt" 2>&1; true'
           node check-rules-tests.mjs "$RT/accessprobe.rules.test.mjs" "$RT/tap.txt"
 
@@ -171,14 +178,14 @@ jobs:
     # ONLY; accessprobe gets nothing but the endpoint and the project id.
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      APPWRITE_VERSION: 2.7.4
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - name: Install Appwrite ${{ env.APPWRITE_VERSION }} (non-interactive)
+      - name: Pinned backend versions (test/versions.json)
+        run: node test/versions.mjs | tee -a "$GITHUB_ENV"
+      - name: Install the pinned Appwrite (non-interactive)
         run: |
           mkdir -p "$RUNNER_TEMP/aw"
           docker run --rm \

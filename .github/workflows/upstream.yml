@@ -1,0 +1,112 @@
+name: Upstream versions
+# Every Monday: are there newer Supabase CLI / firebase-tools / Appwrite / PocketBase releases than
+# the ones pinned in test/versions.json? If so, push the bump to the upstream/bump branch, run CI
+# and Backend e2e on it, and report the result in one issue ("ready to merge" or "this broke").
+# It only changes test/versions.json on its own branch: never main, never a release.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: write # push upstream/bump
+  actions: write # start CI and Backend e2e on it
+  issues: write # the report
+concurrency:
+  group: upstream
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BRANCH: upstream/bump
+      TITLE: 'Upstream: newer backend versions'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Find the newest releases
+        id: bump
+        run: |
+          node test/upstream/bump.mjs > changes.md
+          cat changes.md >> "$GITHUB_STEP_SUMMARY"
+          [ -s changes.md ] || echo "Every pinned backend version is the newest release." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Skip if this exact bump was already reported
+        id: seen
+        if: steps.bump.outputs.changed != ''
+        run: |
+          body=$(gh issue list --state open --search "in:title \"$TITLE\"" --json body --jq '.[0].body // ""')
+          if grep -qF "<!-- versions: ${{ steps.bump.outputs.changed }} -->" <<<"$body"; then
+            echo "already reported: ${{ steps.bump.outputs.changed }}" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push the bump to upstream/bump
+        id: push
+        if: steps.bump.outputs.changed != '' && steps.seen.outputs.skip != '1'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -B "$BRANCH"
+          git add test/versions.json
+          git commit -q -m "Test against newer backends: ${{ steps.bump.outputs.changed }}"
+          git push -f -q origin "$BRANCH"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Run CI and Backend e2e on it
+        id: tests
+        if: steps.push.outputs.sha != ''
+        run: |
+          sha=${{ steps.push.outputs.sha }}
+          gh workflow run ci.yml --ref "$BRANCH"
+          gh workflow run e2e.yml --ref "$BRANCH"
+          ids=""
+          for i in $(seq 1 30); do
+            sleep 10
+            ids=$(gh run list --branch "$BRANCH" --event workflow_dispatch --limit 20 --json databaseId,headSha \
+              --jq "map(select(.headSha == \"$sha\")) | map(.databaseId | tostring) | join(\" \")")
+            [ "$(wc -w <<<"$ids")" -ge 2 ] && break
+          done
+          [ "$(wc -w <<<"$ids")" -ge 2 ] || { echo "the dispatched runs did not show up"; exit 1; }
+          ok=1
+          : > runs.md
+          for id in $ids; do
+            gh run watch "$id" --interval 60 > /dev/null 2>&1 || true
+            gh run view "$id" --json workflowName,conclusion,url,jobs --jq \
+              '"- \(.workflowName): **\(.conclusion)** \(.url)" + ([.jobs[] | select(.conclusion == "failure") | "\n  - failed: \(.name)"] | join(""))' >> runs.md
+            [ "$(gh run view "$id" --json conclusion --jq .conclusion)" = success ] || ok=0
+          done
+          cat runs.md >> "$GITHUB_STEP_SUMMARY"
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+
+      - name: Report in the issue
+        if: always() && steps.push.outputs.sha != ''
+        run: |
+          changed="${{ steps.bump.outputs.changed }}"
+          if [ "${{ steps.tests.outputs.ok }}" = 1 ]; then
+            verdict="✅ Every test passes on the newer versions. Ready to merge: https://github.com/${{ github.repository }}/compare/main...$BRANCH?expand=1"
+          else
+            verdict="❌ Something broke on the newer versions (or the runs could not be started). accessprobe may misjudge users' backends on these versions until it is fixed. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+          {
+            echo "<!-- versions: $changed -->"
+            echo "@${{ github.repository_owner }} the weekly upstream check found newer backend releases than the ones accessprobe is tested against."
+            echo
+            cat changes.md
+            echo
+            echo "$verdict"
+            echo
+            cat runs.md 2>/dev/null || true
+            echo
+            echo "Branch \`$BRANCH\` only changes \`test/versions.json\`. Nothing was merged or released."
+          } > body.md
+          num=$(gh issue list --state open --search "in:title \"$TITLE\"" --json number --jq '.[0].number // empty')
+          if [ -n "$num" ]; then
+            gh issue edit "$num" --body-file body.md
+            gh issue comment "$num" --body "Updated: $changed. $verdict"
+          else
+            gh issue create --title "$TITLE" --body-file body.md
+          fi
