@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Internal
+- Weekly upstream check (`.github/workflows/upstream.yml`): every Monday it looks for newer Supabase CLI, firebase-tools, Appwrite and PocketBase releases than the ones the tests pin. If it finds any, it runs the full CI and backend e2e suites against them on an `upstream/bump` branch and reports in one issue, either as ready to merge or as broken with the failing jobs. All pins now live in `test/versions.json`.
+
 ## [0.14.1] - 2026-11-22
 
 ### Changed

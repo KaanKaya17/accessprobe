@@ -14,11 +14,13 @@
 // ~/.cache/firebase/emulators; that can take a minute.
 
 import { spawn, spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import net from 'node:net';
 
-export const FIREBASE_TOOLS_VERSION = '15.35.0';
+// pinned in test/versions.json
+export const FIREBASE_TOOLS_VERSION = JSON.parse(readFileSync(new URL('../versions.json', import.meta.url), 'utf8'))['firebase-tools'];
 export const PROJECT_ID = 'demo-accessprobe';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
