@@ -1,5 +1,5 @@
 name: accessprobe
-description: Prove your Supabase RLS and Firebase rules work. Two real test users attack each other's data; only proven leaks fail the build.
+description: "Prove your Supabase RLS and Firebase rules work: two test users attack each other's data; only proven leaks fail the build."
 author: Kaan Kaya
 branding:
   icon: shield
